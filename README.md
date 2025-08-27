@@ -169,7 +169,7 @@ IOS:
 
  1. once you have installed ntfy  , 
  2. go in the app click + & set up (or subscribe) a topic name for this test
- 3. lets use : **x728_TEST**
+ 3. lets use : **x728_UPS_TEST**  << this is default topic when run without any args , so change after tests as you need
 
 **TIP*** if you haven't installed as service yet ***skip to*** ***STEP 3***
 
@@ -185,12 +185,15 @@ IOS:
 we use the options :
 1/ enable ntfy mode 
 2/ tell it we want a test message only 
-3/ Topic name {x728_TEST}
+3/ Topic name {x728_UPS_TEST}
 
 command to use :
 
-    ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy --ntfy-topic x728_TEST
-
+    ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy 
+    
+ to re-run with your own topic (dont forget to add it to your ntfy app as well)
+ 
+    Try:   --ntfy-topic NAME    eg ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy  --ntfy-topic UPS_PI_OFFICE
 
 you should receive a alert pretty quick like this :
 
