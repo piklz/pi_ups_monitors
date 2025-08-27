@@ -25,7 +25,7 @@
 #   ./presto_hatc_monitor.py                     # Run monitoring directly with default settings
 #   ./presto_hatc_monitor.py --install_as_service # Install as a systemd service
 #   ./presto_hatc_monitor.py --force-reinstall   # Force reinstall the service without prompting
-#   ./presto_hatc_monitor.py --addr 0x43 --ntfy-topic pizero_UPSc  # Run with custom settings
+#   ./presto_hatc_monitor.py --addr 0x43 --ntfy-topic pizero_UPSc_TEST  # Run with custom settings
 #   sudo systemctl status presto_ups.service    # Check service status
 #   journalctl -t presto_ups                   # View logs
 # -----------------------------------------------
@@ -99,7 +99,7 @@ class Mode:
     SANDBVOLT_CONTINUOUS    = 0x07
 
 class INA219:
-    def __init__(self, i2c_bus=1, addr=0x43, ntfy_server="https://ntfy.sh", ntfy_topic="pizero_UPSc", power_threshold=0.5, percent_threshold=20.0, battery_capacity_mAh=1000, battery_voltage=3.7):
+    def __init__(self, i2c_bus=1, addr=0x43, ntfy_server="https://ntfy.sh", ntfy_topic="pizero_UPSc_TEST", power_threshold=0.5, percent_threshold=20.0, battery_capacity_mAh=1000, battery_voltage=3.7):
         self.bus = smbus.SMBus(i2c_bus)
         self.addr = addr
         self.ntfy_server = ntfy_server
@@ -505,7 +505,7 @@ def main():
     parser.add_argument("--install_as_service", action="store_true", help="Install as a systemd service")
     parser.add_argument("--addr", default="0x43", help="I2C address of INA219 (e.g., 0x43)")
     parser.add_argument("--ntfy-server", default="https://ntfy.sh", help="ntfy server URL")
-    parser.add_argument("--ntfy-topic", default="pizero_UPSc", help="ntfy topic for notifications")
+    parser.add_argument("--ntfy-topic", default="pizero_UPSc_TEST", help="ntfy topic for notifications")
     parser.add_argument("--power-threshold", type=float, default=0.5, help="Power threshold for alerts in watts")
     parser.add_argument("--percent-threshold", type=float, default=20.0, help="Battery percentage threshold for alerts")
     parser.add_argument("--battery-capacity", type=int, default=1000, help="Battery capacity in mAh")

@@ -195,7 +195,7 @@ except ImportError:
         sys.exit(1)
 
 class X728Monitor:
-    def __init__(self, enable_ntfy=False, ntfy_server="https://ntfy.sh", ntfy_topic="x728_UPS", low_battery_threshold=30, critical_low_threshold=10):
+    def __init__(self, enable_ntfy=False, ntfy_server="https://ntfy.sh", ntfy_topic="x728_UPS_TEST", low_battery_threshold=30, critical_low_threshold=10):
         self.enable_ntfy = enable_ntfy
         self.ntfy_server = ntfy_server
         self.ntfy_topic = ntfy_topic
