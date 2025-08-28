@@ -8,6 +8,8 @@
 [![GitHub Forks](https://img.shields.io/github/forks/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/network/members)
 [![GitHub Issues](https://img.shields.io/github/issues/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/issues) 
 
+## [support me! ☕](https://buymeacoffee.com/pixelpiklz)
+
 </div>
 
 <p align="center "> <img width="520" height="382" alt="piklz_ups_monitors_logo" src="https://github.com/user-attachments/assets/2ea1f180-bb89-4302-8931-576cd7aebd09" /></p>
@@ -16,7 +18,9 @@
 <p align="center"> <img width="300" height="300" src="https://github.com/user-attachments/assets/cfdc4e0d-7ec1-4560-94fe-9bb576172f34"/>
 <img width="300" height="226" src="https://github.com/user-attachments/assets/c67341a6-6d0c-4368-8f3f-67c879ca9918"/></p>
 
-A collection of Python scripts designed for monitoring Uninterruptible Power Supply (UPS) HATs on Raspberry Pi devices. The primary focus is on the Geekworm X728 v1.2 and Waveshare PiZero-HAT-C models for now  , which are essential for ensuring the safe operation of your projects. 
+***
+**_A collection of Python scripts designed for monitoring Uninterruptible Power Supply (UPS) HATs on Raspberry Pi devices_**.<br> </br> 
+The primary focus is on the Geekworm X728 v1.2 and Waveshare PiZero-HAT-C models for now  , which are essential for ensuring the safe operation of your projects. 
 
 > My Raspberry Pi projects tend to be in headless mode in remote locations alot of the time, These scripts monitor critical metrics like battery voltage and power status, enabling automated, graceful shutdowns to prevent data corruption from sudden power loss. The scripts can also send real-time notifications via Ntfy, keeping you informed of any power-related issues. .🚀
 
