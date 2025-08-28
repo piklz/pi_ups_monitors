@@ -10,8 +10,8 @@
 
 </div>
 
+<p align="center "> <img width="520" height="382" alt="piklz_ups_monitors_logo" src="https://github.com/user-attachments/assets/2ea1f180-bb89-4302-8931-576cd7aebd09" /></p>
 
-<p align="center "> <img width="600" height="400" alt="piklz_ups_monitors_logo" src="https://github.com/user-attachments/assets/69d541fc-9509-4275-98db-4790f772b444" /></p>
 <br> </br>
 <p align="center"> <img width="300" height="300" src="https://github.com/user-attachments/assets/cfdc4e0d-7ec1-4560-94fe-9bb576172f34"/>
 <img width="300" height="226" src="https://github.com/user-attachments/assets/c67341a6-6d0c-4368-8f3f-67c879ca9918"/></p>
