@@ -8,15 +8,19 @@
 [![GitHub Forks](https://img.shields.io/github/forks/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/network/members)
 [![GitHub Issues](https://img.shields.io/github/issues/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/issues) 
 
+## [support me! ☕](https://buymeacoffee.com/pixelpiklz)
+
 </div>
 
+<p align="center "> <img width="520" height="382" alt="piklz_ups_monitors_logo" src="https://github.com/user-attachments/assets/2ea1f180-bb89-4302-8931-576cd7aebd09" /></p>
 
-<p align="center "> <img width="600" height="400" alt="piklz_ups_monitors_logo" src="https://github.com/user-attachments/assets/69d541fc-9509-4275-98db-4790f772b444" /></p>
 <br> </br>
 <p align="center"> <img width="300" height="300" src="https://github.com/user-attachments/assets/cfdc4e0d-7ec1-4560-94fe-9bb576172f34"/>
 <img width="300" height="226" src="https://github.com/user-attachments/assets/c67341a6-6d0c-4368-8f3f-67c879ca9918"/></p>
 
-A collection of Python scripts designed for monitoring Uninterruptible Power Supply (UPS) HATs on Raspberry Pi devices. The primary focus is on the Geekworm X728 v1.2 and Waveshare PiZero-HAT-C models for now  , which are essential for ensuring the safe operation of your projects. 
+***
+**_A collection of Python scripts designed for monitoring Uninterruptible Power Supply (UPS) HATs on Raspberry Pi devices_**.<br> </br> 
+The primary focus is on the Geekworm X728 v1.2 and Waveshare PiZero-HAT-C models for now  , which are essential for ensuring the safe operation of your projects. 
 
 > My Raspberry Pi projects tend to be in headless mode in remote locations alot of the time, These scripts monitor critical metrics like battery voltage and power status, enabling automated, graceful shutdowns to prevent data corruption from sudden power loss. The scripts can also send real-time notifications via Ntfy, keeping you informed of any power-related issues. .🚀
 
@@ -46,7 +50,7 @@ Key benefits:
 - can run in background as a system service set-and-forget!
 
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
 
 ### Built With
 
@@ -54,7 +58,7 @@ Key benefits:
 - SMBus/I2C - For hardware communication
 - Raspberry Pi OS - Tested on Bookworm  pi5 should be ok on debian os's like dietpi and ubuntu (i am testing when possible )and other pi's zero to 5
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
 
 ## Getting Started
 
@@ -155,6 +159,7 @@ options:
 firstly you'll need the app on your phone you can grab it from here :
 **STEP 1:**
 
+<p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
 
 ![ntfy](https://play-lh.googleusercontent.com/O9uRWkaFLCzl7wkpeUWFuJfllrvykC6wOCR3sy8sZkrCyIMs-DPv7j7D710QY8VSc7KN=w240-h480-rw)
 
@@ -169,7 +174,7 @@ IOS:
 
  1. once you have installed ntfy  , 
  2. go in the app click + & set up (or subscribe) a topic name for this test
- 3. lets use : **x728_TEST**
+ 3. lets use : **x728_UPS_TEST**  << this is default topic when run without any args , so change after tests as you need
 
 **TIP*** if you haven't installed as service yet ***skip to*** ***STEP 3***
 
@@ -185,12 +190,15 @@ IOS:
 we use the options :
 1/ enable ntfy mode 
 2/ tell it we want a test message only 
-3/ Topic name {x728_TEST}
+3/ Topic name {x728_UPS_TEST}
 
 command to use :
 
-    ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy --ntfy-topic x728_TEST
-
+    ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy 
+    
+ to re-run with your own topic (dont forget to add it to your ntfy app as well)
+ 
+    Try:   --ntfy-topic NAME    eg ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy  --ntfy-topic UPS_PI_OFFICE
 
 you should receive a alert pretty quick like this :
 
@@ -235,4 +243,6 @@ run you script  as normal in terminal with  your flags options ,then when done t
   - Debug logs (if --**debug** enabled): 
     - ***journalctl -u x728_ups.service | grep DEBUG -m 10***
     - and ofcourse the usual dmesg -f daemon     
-    - and check your  '/var/logs'   cat /var/logs/....etc 
+    - and check your  '/var/logs'   cat /var/logs/....etc
+   
+<p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
