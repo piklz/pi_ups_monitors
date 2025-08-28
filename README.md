@@ -50,7 +50,7 @@ Key benefits:
 - can run in background as a system service set-and-forget!
 
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+<p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
 
 ### Built With
 
@@ -58,7 +58,7 @@ Key benefits:
 - SMBus/I2C - For hardware communication
 - Raspberry Pi OS - Tested on Bookworm  pi5 should be ok on debian os's like dietpi and ubuntu (i am testing when possible )and other pi's zero to 5
 
-<p align="right">(<a href="#readme-ov-file">back to top</a>)</p>
+<p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
 
 ## Getting Started
 
@@ -242,4 +242,6 @@ run you script  as normal in terminal with  your flags options ,then when done t
   - Debug logs (if --**debug** enabled): 
     - ***journalctl -u x728_ups.service | grep DEBUG -m 10***
     - and ofcourse the usual dmesg -f daemon     
-    - and check your  '/var/logs'   cat /var/logs/....etc 
+    - and check your  '/var/logs'   cat /var/logs/....etc
+   
+<p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
