@@ -5,10 +5,10 @@
 #            | |_| |/ /_\ \| |  ___ 
 #            |  _  ||  _  || | / __|
 #            | | | || | | || |  (__ 
-# waveshares \_| |_/\_| |_/\_/ \___| UPS for pizero (https://www.waveshare.com/ups-hat-c.htm)                            
+# waveshares \_| |_/\_| |_/\_/ \___| UPS for pizero  [](https://www.waveshare.com/ups-hat-c.htm)                            
 # -----------------------------------------------
 # Presto UPS Monitor Script
-# Version: 1.4.6
+# Version: 1.4.7
 # Author: piklz
 # GitHub: https://github.com/piklz/pi_ups_monitor
 # Description:
@@ -22,7 +22,8 @@
 #   to reduce SD card wear.
 #
 # Changelog:
-#   Version 1.4.6 (2025-08-28):
+#   Version 1.4.7 (2025-08-28):
+#     - Improved uninstall_service by adding a second systemd daemon-reload and reset-failed to ensure unit is fully purged, reducing the likelihood of "service still loaded" warning.
 #     - Fixed uninstall_service to robustly detect and remove service by checking both file existence and systemd loaded units, ensuring proper cleanup.
 #     - Skipped systemctl reset-failed in install_as_service if service is not loaded to avoid unnecessary warning.
 #   Version 1.4.5 (2025-08-28):
@@ -487,7 +488,7 @@ def install_as_service(args):
         log_message("ERROR", "Service installation must be run as root")
     log_message("INFO", f"Installing Presto UPS HAT monitor service for user {USER}")
 
-    service_file = "/etc/systemd/system/presto_hatc_ups.service"
+    service_file = "/etc/systemd/system/presto_ups.service"
     target_script = "/usr/local/bin/presto_hatc_monitor.py"
     service_exists = os.path.exists(service_file)
     service_running = False
@@ -637,7 +638,7 @@ def uninstall_service():
         log_message("ERROR", "Service uninstallation must be run as root")
     log_message("INFO", f"Uninstalling Presto UPS monitor service for user {USER}")
 
-    service_file = "/etc/systemd/system/presto_hatc_ups.service"
+    service_file = "/etc/systemd/system/presto_ups.service"
     target_script = "/usr/local/bin/presto_hatc_monitor.py"
     service_exists = False
     service_running = False
@@ -815,7 +816,7 @@ def sample_ina219(monitor, data_queue, data_lock):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Presto UPS HAT Monitor with Service Installation (Version 1.4.6)",
+        description="Presto UPS HAT Monitor with Service Installation (Version 1.4.7)",
         epilog="""
 Useful journalctl commands for monitoring:
   - Recent voltage/current logs: journalctl -u presto_ups.service | grep -E "Voltage|Current|Power|Percent" -m 10
