@@ -825,7 +825,7 @@ Useful journalctl commands for monitoring:
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("-v", "--version",action="version",version=f"%(prog)s v{VERSION}")
+    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s v{VERSION}")
     parser.add_argument("--install_as_service", action="store_true", help="Install as a systemd service")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall the presto_ups service")
     parser.add_argument("--test-ntfy", action="store_true", help="Send a test ntfy notification (requires --enable-ntfy)")
