@@ -8,7 +8,7 @@
 # waveshares \_| |_/\_| |_/\_/ \___| UPS for pizero  [](https://www.waveshare.com/ups-hat-c.htm)                            
 # -----------------------------------------------
 # Presto UPS Monitor Script
-# Version: 1.4.7
+# Version: 1.4.8
 # Author: piklz
 # GitHub: https://github.com/piklz/pi_ups_monitor
 # Description:
@@ -22,6 +22,8 @@
 #   to reduce SD card wear.
 #
 # Changelog:
+#   Version 1.4.8 (2025-09-02):
+#     - Increased sampling interval from 2 seconds to 5 seconds to reduce CPU usage and improve stability. Added -v/--version argument to display script version.
 #   Version 1.4.7 (2025-08-28):
 #     - Improved uninstall_service by adding a second systemd daemon-reload and reset-failed to ensure unit is fully purged, reducing the likelihood of "service still loaded" warning.
 #     - Fixed uninstall_service to robustly detect and remove service by checking both file existence and systemd loaded units, ensuring proper cleanup.
@@ -33,13 +35,7 @@
 #     - Reduced verbosity of ntfy notification skips by logging "ntfy disabled" only once and suppressing non-critical skip logs, aligning with x728 script behavior.
 #   Version 1.4.3 (2025-08-28):
 #     - Fixed UTF-8 encoding issue in test_ntfy and send_ntfy_notification to handle emojis correctly, matching x728 script.
-#   Version 1.4.2 (2025-08-28):
-#     - Ported features from x728 script: added --enable-ntfy (default False), --test-ntfy, --uninstall, --debug.
-#     - Made ntfy optional; improved install_as_service with robust reinstall handling (no --force-reinstall needed).
-#     - Added notification queue for cooldown handling, enhanced notifications with system info.
-#     - Added debug logging for raw I2C data; unified dependency checks for --help.
-#     - Fixed service target to /usr/local/bin; added process cleanup during installation.
-#     - Added epilog with journalctl tips; validated thresholds more robustly.
+#
 #
 # Usage:
 #   ./presto_hatc_monitor.py                     # Run monitoring directly with default settings
@@ -64,6 +60,8 @@ from datetime import datetime, timedelta
 from collections import deque
 import threading
 import queue
+
+VERSION= "1.4.8"
 
 # Color variables
 COL_NC='\033[0m'
@@ -581,7 +579,8 @@ ExecStart={exec_start}
 WorkingDirectory=/usr/local/bin
 StandardOutput=journal
 StandardError=journal
-Restart=always
+Restart=on-failure
+RestartSec=10
 User={USER}
 
 [Install]
@@ -797,7 +796,7 @@ def sample_ina219(monitor, data_queue, data_lock):
             monitor.power_readings.append(power)
             monitor.current_readings.append(current)
             if len(monitor.power_readings) < monitor.power_readings.maxlen:
-                time.sleep(2)
+                time.sleep(5)
                 continue
             all_negative = all(c < -10 for c in monitor.current_readings)
             all_positive = all(c > 10 for c in monitor.current_readings)
@@ -812,11 +811,11 @@ def sample_ina219(monitor, data_queue, data_lock):
             monitor.process_notification_queue()
         except Exception as e:
             log_message("ERROR", f"Sampling error: {e}")
-        time.sleep(2)
+        time.sleep(5)
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Presto UPS HAT Monitor with Service Installation (Version 1.4.7)",
+        description="Presto UPS HAT Monitor with Service Installation (Version {VERSION})",
         epilog="""
 Useful journalctl commands for monitoring:
   - Recent voltage/current logs: journalctl -u presto_ups.service | grep -E "Voltage|Current|Power|Percent" -m 10
@@ -826,6 +825,7 @@ Useful journalctl commands for monitoring:
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    parser.add_argument("-v", "--version",action="version",version=f"%(prog)s v{VERSION}"    )
     parser.add_argument("--install_as_service", action="store_true", help="Install as a systemd service")
     parser.add_argument("--uninstall", action="store_true", help="Uninstall the presto_ups service")
     parser.add_argument("--test-ntfy", action="store_true", help="Send a test ntfy notification (requires --enable-ntfy)")
