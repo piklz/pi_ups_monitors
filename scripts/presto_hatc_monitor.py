@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 #
-#             _   _   ___ _____    
-#            | | | | / _ \_   _|   
-#            | |_| |/ /_\ \| |  ___ 
+#             _   _   ___ _____
+#            | | | | / _ \_   _|
+#            | |_| |/ /_\ \| |  ___
 #            |  _  ||  _  || | / __|
-#            | | | || | | || |  (__ 
-# waveshares \_| |_/\_| |_/\_/ \___| UPS for pizero  [](https://www.waveshare.com/ups-hat-c.htm)                            
+#            | | | || | | || |  (__
+# waveshares \_| |_/\_| |_/\_/ \___| UPS for pizero (https://www.waveshare.com/ups-hat-c.htm)
 # -----------------------------------------------
 # Presto UPS Monitor Script
-# Version: 1.4.8
+# Version: 1.4.24
 # Author: piklz
 # GitHub: https://github.com/piklz/pi_ups_monitor
 # Description:
@@ -17,882 +17,730 @@
 #   sends notifications via ntfy for power events and can be installed as a systemd
 #   service for continuous monitoring. Logs are sent to systemd-journald using
 #   systemd-cat, with rotation managed by journald (configure in /etc/systemd/journald.conf).
-#   Sampling occurs every 2 seconds asynchronously, with logging every 10 seconds.
+#   Sampling occurs every 5 seconds asynchronously, with logging every 10 seconds.
 #   Persistent journal storage (/var/log/journal/) is recommended, ideally with log2ram
 #   to reduce SD card wear.
 #
 # Changelog:
-#   Version 1.4.8 (2025-09-02):
-#     - Increased sampling interval from 2 seconds to 5 seconds to reduce CPU usage and improve stability. Added -v/--version argument to display script version.
-#   Version 1.4.7 (2025-08-28):
-#     - Improved uninstall_service by adding a second systemd daemon-reload and reset-failed to ensure unit is fully purged, reducing the likelihood of "service still loaded" warning.
-#     - Fixed uninstall_service to robustly detect and remove service by checking both file existence and systemd loaded units, ensuring proper cleanup.
-#     - Skipped systemctl reset-failed in install_as_service if service is not loaded to avoid unnecessary warning.
-#   Version 1.4.5 (2025-08-28):
-#     - Refactored notification logic to call send_ntfy_notification only when specific conditions are met, reducing unnecessary logs and aligning with x728 script behavior.
-#     - Fixed residual process termination during installation by excluding lines containing "--install_as_service" to prevent killing the current installation process.
-#   Version 1.4.4 (2025-08-28):
-#     - Reduced verbosity of ntfy notification skips by logging "ntfy disabled" only once and suppressing non-critical skip logs, aligning with x728 script behavior.
-#   Version 1.4.3 (2025-08-28):
-#     - Fixed UTF-8 encoding issue in test_ntfy and send_ntfy_notification to handle emojis correctly, matching x728 script.
+#   Version 1.4.24 (2025-09-12):
+#   - Fixed a race condition bug where rapid plugging/unplugging caused multiple
+#     simultaneous state change logs. A 5-second debounce delay has been added to the
+#     power state detection logic for stability.
 #
+#   Version 1.4.23 (2025-09-11):
+#   - Fixed an OSError that occurred when running as a systemd service by removing
+#     the call to os.getlogin(). This function fails in non-interactive environments.
+#   - Added `User=pi` and `WorkingDirectory=/home/pi` to the systemd service file
+#     template for improved stability and security.
+
+# usage examples:
+#   - default live view monitoring run (no notifications)in terminal:
+#       sudo ~/pi_ups-monitors/presto_hatc_monitor.py  
+#     
+#   - To RUN LIVE interminal directly with ntfy notifications enabled and your custom topic:
+#       sudo ~/pi_ups-monitors/presto_hatc_monitor.py --enable-ntfy --ntfy-topic YOUR-TOPIC-NAME     #eg PIZERO_SERVER_LIVINGROOM
 #
-# Usage:
-#   ./presto_hatc_monitor.py                     # Run monitoring directly with default settings
-#   ./presto_hatc_monitor.py --install_as_service # Install as a systemd service
-#   ./presto_hatc_monitor.py --uninstall         # Uninstall the service
-#   ./presto_hatc_monitor.py --test-ntfy         # Send test ntfy notification (requires --enable-ntfy)
-#   ./presto_hatc_monitor.py --addr 0x43 --enable-ntfy --ntfy-topic pizero_UPSc_TEST  # Run with custom settings
-#   sudo systemctl status presto_ups.service    # Check service status
-#   journalctl -t presto_ups                   # View logs
+#   - To INSTALL as a systemd service with your custom topicname (requires root):
+#       sudo ~/pi_ups-monitors/presto_hatc_monitor.py --install_as_service --enable-ntfy  --ntfy-topic YOUR-TOPIC-NAME
+#
+#   - To UNINSTALL the systemd service (requires root):
+#       sudo ~/pi_ups-monitors/presto_hatc_monitor.py --uninstall 
+#
+#   - One shot test notification (requires --enable-ntfy/-ntfy) using shortened args:
+#       sudo ~/pi_ups-monitors/presto_hatc_monitor.py -ntfy -nt PIZERO_HATC_TEST -t
 # -----------------------------------------------
 
-import argparse
-import os
-import subprocess
+# Standard library imports
 import sys
+import os
+import argparse
 import time
-import smbus
-import requests
 import socket
-import re
-from datetime import datetime, timedelta
-from collections import deque
+import subprocess
 import threading
-import queue
+import shutil
+from datetime import datetime, timedelta
+from queue import Queue
 
-VERSION= "1.4.8"
+# Third-party imports, may not be available on all systems
+try:
+    import smbus
+    bus = smbus.SMBus(1)
+except ImportError:
+    smbus = None
+    bus = None
 
-# Color variables
-COL_NC='\033[0m'
-COL_INFO='\033[1;34m'
-COL_WARNING='\033[1;33m'
-COL_ERROR='\033[1;31m'
+try:
+    import requests
+except ImportError:
+    requests = None
 
-# Determine real user
-USER = os.getenv("SUDO_USER") or os.getenv("USER") or os.popen("id -un").read().strip()
+# Constants
+VERSION = "1.4.24"
+I2C_ADDRESS = 0x43
+SERVICE_NAME = "presto_ups.service"
+SERVICE_TEMPLATE = """
+[Unit]
+Description=Presto UPS HAT Monitor Service
+After=network.target
 
-# Global debug flag
-DEBUG_ENABLED = False
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi
+ExecStart=/usr/bin/python3 {script_path} --enable-ntfy --ntfy-server {ntfy_server} --ntfy-topic {ntfy_topic} --power_threshold {power_threshold} --percent_threshold {percent_threshold} --critical_low_threshold {critical_low_threshold} --critical_shutdown_delay {critical_shutdown_delay} --battery_capacity_mah {battery_capacity_mah} --ntfy_cooldown_seconds {ntfy_cooldown_seconds}
+Restart=on-failure
+RestartSec=10s
 
-HAS_REQUESTS = False  # Will be set in check_dependencies
+[Install]
+WantedBy=multi-user.target
+"""
+SERVICE_FILE_PATH = f"/etc/systemd/system/{SERVICE_NAME}"
 
-# Configuration for INA219
+# INA219 Registers and Configuration (from original script)
 _REG_CONFIG                 = 0x00
 _REG_SHUNTVOLTAGE           = 0x01
 _REG_BUSVOLTAGE             = 0x02
 _REG_POWER                  = 0x03
 _REG_CURRENT                = 0x04
 _REG_CALIBRATION            = 0x05
+R_SHUNT                     = 0.1  # Ohms (shunt resistor value on the INA219 board) https://www.waveshare.com/ups-hat-c.htm 
 
-class BusVoltageRange:
-    RANGE_16V               = 0x00
-    RANGE_32V               = 0x01
+# Configuration thresholds (can be changed via command-line arguments)
+POWER_THRESHOLD = 0.5  # Minimum power (Watts) to consider as plugged in (0.5W is very low, but the UPS HAT draws ~0.3W when idle)
+PERCENT_THRESHOLD = 10  # Battery percentage threshold for low battery alert (10% is a common threshold)
+CRITICAL_LOW_THRESHOLD = 5  # Battery percentage for critical low alert (5% is very low, but gives some buffer for a shutdown)
+CRITICAL_SHUTDOWN_DELAY = 60  # Delay (seconds) before shutdown on critical battery level
+VOLTAGE_THRESHOLD_PLUGGED_IN = 4.1  # Voltage threshold to detect external power (4.1V is a good threshold to distinguish between battery and external power)
+CURRENT_THRESHOLD_CHARGING = 100  # Minimum current (mA) to detect charging (100mA is a good threshold to distinguish between charging and idle)
+CURRENT_THRESHOLD_DISCHARGING = -100  # Current (mA) threshold to detect discharging (-100mA is a good threshold to distinguish between discharging and idle)
+NTFY_COOLDOWN_SECONDS = 120  #2 mins Cooldown (seconds) between repeated notifications for the same event    
+BATTERY_CAPACITY_MAH = 1000 # Default capacity of the lipo included battery (can be adjusted if you add a bigger lipo battery eg. 3000mah- modify this value and your power wattage/time left will be more accurate)
+STATE_CHANGE_DEBOUNCE_SECONDS = 5 # Prevents rapid-fire state changes
 
-class Gain:
-    DIV_1_40MV              = 0x00
-    DIV_2_80MV              = 0x01
-    DIV_4_160MV             = 0x02
-    DIV_8_320MV             = 0x03
+def log_message(level, message, exit_on_error=True):
+    """
+    Logs a message to the terminal and journald with a consistent format.
+    """
+    script_name = "presto-UPSc-service"
+    
+    # Check if a log level is provided and add brackets
+    if level:
+        log_level_str = f"[{script_name}] [{level}]"
+    else:
+        log_level_str = f"[{script_name}]"
+        
+    log_line = f"{log_level_str} {message}"
+    
+    # Use print for all output, as systemd-cat will capture it
+    print(log_line)
+    
+    # Exit on critical error
+    if level == "ERROR" and exit_on_error:
+        sys.exit(1)
 
-class ADCResolution:
-    ADCRES_9BIT_1S          = 0x00
-    ADCRES_10BIT_1S         = 0x01
-    ADCRES_11BIT_1S         = 0x02
-    ADCRES_12BIT_1S         = 0x03
-    ADCRES_12BIT_2S         = 0x09
-    ADCRES_12BIT_4S         = 0x0A
-    ADCRES_12BIT_8S         = 0x0B
-    ADCRES_12BIT_16S        = 0x0C
-    ADCRES_12BIT_32S        = 0x0D
-    ADCRES_12BIT_64S        = 0x0E
-    ADCRES_12BIT_128S       = 0x0F
+def check_dependencies():
+    """
+    Checks for essential dependencies and exits if they are not met.
+    """
+    log_message("INFO", "Checking dependencies...")
+    
+    # Check for python3
+    python_version = sys.version.split()[0]
+    log_message("INFO", f"Python3 is installed: Python {python_version}")
 
-class Mode:
-    POWERDOW                = 0x00
-    SVOLT_TRIGGERED         = 0x01
-    BVOLT_TRIGGERED         = 0x02
-    SANDBVOLT_TRIGGERED     = 0x03
-    ADCOFF                  = 0x04
-    SVOLT_CONTINUOUS        = 0x05
-    BVOLT_CONTINUOUS        = 0x06
-    SANDBVOLT_CONTINUOUS    = 0x07
+    # Check for requests library
+    if requests is None:
+        log_message("ERROR", "python3-requests is not installed. Please install it with 'sudo apt install python3-requests'")
 
-class PrestoMonitor:
-    def __init__(self, i2c_bus=1, addr=0x43, enable_ntfy=False, ntfy_server="https://ntfy.sh", ntfy_topic="pizero_UPSc_TEST", power_threshold=0.5, percent_threshold=20.0, battery_capacity_mAh=1000, battery_voltage=3.7):
-        self.bus = smbus.SMBus(i2c_bus)
-        self.addr = addr
+    # Check for smbus
+    if smbus is None:
+        log_message("ERROR", "python3-smbus is not installed. Please install it with 'sudo apt install python3-smbus'")
+
+    # Check if smbus is functional
+    try:
+        bus.read_byte(I2C_ADDRESS)
+        log_message("INFO", "smbus module is functional")
+    except Exception as e:
+        log_message("ERROR", f"Failed to communicate with I2C bus at address {hex(I2C_ADDRESS)}. Check your hardware connections and make sure I2C is enabled with 'sudo raspi-config'. Error: {e}")
+
+    # Check for libraspberrypi-bin
+    try:
+        subprocess.run(["vcgencmd", "version"], check=True, capture_output=True)
+        log_message("INFO", "libraspberrypi-bin is installed")
+    except FileNotFoundError:
+        log_message("ERROR", "libraspberrypi-bin is not installed. Please install it with 'sudo apt install libraspberrypi-bin'")
+
+class Monitor:
+    """
+    Class to manage all monitoring functions.
+    """
+    def __init__(self, enable_ntfy=False, ntfy_server=None, ntfy_topic=None, power_threshold=POWER_THRESHOLD, percent_threshold=PERCENT_THRESHOLD, critical_low_threshold=CRITICAL_LOW_THRESHOLD, critical_shutdown_delay=CRITICAL_SHUTDOWN_DELAY, battery_capacity_mah=BATTERY_CAPACITY_MAH, ntfy_cooldown_seconds=NTFY_COOLDOWN_SECONDS):
         self.enable_ntfy = enable_ntfy
         self.ntfy_server = ntfy_server
         self.ntfy_topic = ntfy_topic
         self.power_threshold = power_threshold
         self.percent_threshold = percent_threshold
-        self.battery_capacity_mAh = battery_capacity_mAh
-        self.battery_voltage = battery_voltage
-        self.last_notification = None
-        self.notification_cooldown = timedelta(minutes=5)
-        self.power_readings = deque(maxlen=5)
-        self.current_readings = deque(maxlen=3)
+        self.critical_low_threshold = critical_low_threshold
+        self.critical_shutdown_delay = critical_shutdown_delay
+        self.battery_capacity_mah = battery_capacity_mah
+        self.ntfy_cooldown_seconds = ntfy_cooldown_seconds
+
         self.is_unplugged = False
+        self.last_power_state_change_time = time.time() # New debounce variable
         self.low_power_notified = False
         self.low_percent_notified = False
-        self._cal_value = 0
-        self._current_lsb = 0
-        self._power_lsb = 0
-        self.notification_queue = []
+        self.critical_low_timer_started = False
+        self.critical_shutdown_timer_start_time = None
+        self.last_ntfy_notification_time = 0
+        self.unplugged_start_time = None
+
+        self.ntfy_notification_queue = Queue()
+        self.power_readings = []
+        self.current_readings = []
+
+        # Configure INA219 using original script's methods
         self.set_calibration_16V_5A()
 
     def read(self, address):
-        data = self.bus.read_i2c_block_data(self.addr, address, 2)
+        """Helper function to read from I2C bus (from original script)."""
+        data = bus.read_i2c_block_data(I2C_ADDRESS, address, 2)
         value = (data[0] * 256) + data[1]
-        if DEBUG_ENABLED:
-            log_message("DEBUG", f"Raw I2C read from addr {self.addr:#x}, reg {address:#x}: {value}")
         return value
 
     def write(self, address, data):
+        """Helper function to write to I2C bus (from original script)."""
         temp = [0, 0]
         temp[1] = data & 0xFF
         temp[0] = (data & 0xFF00) >> 8
-        self.bus.write_i2c_block_data(self.addr, address, temp)
-        if DEBUG_ENABLED:
-            log_message("DEBUG", f"Raw I2C write to addr {self.addr:#x}, reg {address:#x}: {data}")
+        bus.write_i2c_block_data(I2C_ADDRESS, address, temp)
 
     def set_calibration_16V_5A(self):
+        """Sets INA219 calibration register using values from original script."""
         self._current_lsb = 0.1524
         self._cal_value = 26868
         self._power_lsb = 0.003048
         self.write(_REG_CALIBRATION, self._cal_value)
-        self.bus_voltage_range = BusVoltageRange.RANGE_16V
-        self.gain = Gain.DIV_2_80MV
-        self.bus_adc_resolution = ADCResolution.ADCRES_12BIT_32S
-        self.shunt_adc_resolution = ADCResolution.ADCRES_12BIT_32S
-        self.mode = Mode.SANDBVOLT_CONTINUOUS
-        self.config = self.bus_voltage_range << 13 | \
-                      self.gain << 11 | \
-                      self.bus_adc_resolution << 7 | \
-                      self.shunt_adc_resolution << 3 | \
-                      self.mode
-        self.write(_REG_CONFIG, self.config)
-
-    def getShuntVoltage_mV(self):
-        self.write(_REG_CALIBRATION, self._cal_value)
-        value = self.read(_REG_SHUNTVOLTAGE)
-        if value > 32767:
-            value -= 65535
-        return value * 0.01
+        config_value = 0x4127
+        self.write(_REG_CONFIG, config_value)
 
     def getBusVoltage_V(self):
+        """Returns the bus voltage in Volts (from original script)."""
         self.write(_REG_CALIBRATION, self._cal_value)
         self.read(_REG_BUSVOLTAGE)
         return (self.read(_REG_BUSVOLTAGE) >> 3) * 0.004
 
     def getCurrent_mA(self):
+        """Returns the current in milliamps (from original script)."""
         value = self.read(_REG_CURRENT)
         if value > 32767:
             value -= 65535
         return value * self._current_lsb
 
     def getPower_W(self):
+        """Returns the power in Watts (from original script)."""
         self.write(_REG_CALIBRATION, self._cal_value)
         value = self.read(_REG_POWER)
         if value > 32767:
             value -= 65535
         return value * self._power_lsb
 
-    def get_cpu_temp(self):
-        try:
-            with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
-                temp = float(f.read()) / 1000.0
-                return temp
-        except Exception:
-            return None
-
-    def get_gpu_temp(self):
-        try:
-            result = subprocess.run(['vcgencmd', 'measure_temp'], capture_output=True, text=True)
-            temp_str = result.stdout.strip().split('=')[1].split("'")[0]
-            return float(temp_str)
-        except Exception:
-            return None
-
+    def get_percent(self, voltage):
+        """
+        Calculates battery percentage based on voltage.
+        Note: This is an estimation and may not be perfectly accurate.
+        """
+        if voltage > 4.18:
+            return 100.0
+        elif voltage > 4.15:
+            return 99.0
+        elif voltage > 4.10:
+            return 95.0
+        elif voltage > 4.05:
+            return 90.0
+        elif voltage > 3.98:
+            return 80.0
+        elif voltage > 3.90:
+            return 70.0
+        elif voltage > 3.82:
+            return 60.0
+        elif voltage > 3.75:
+            return 50.0
+        elif voltage > 3.68:
+            return 40.0
+        elif voltage > 3.60:
+            return 30.0
+        elif voltage > 3.52:
+            return 20.0
+        elif voltage > 3.45:
+            return 10.0
+        else:
+            return 5.0
+    
     def get_hostname(self):
-        try:
-            return socket.gethostname()
-        except Exception:
-            return "Unknown"
+        """Returns the device hostname."""
+        return socket.gethostname()
 
     def get_ip_address(self):
+        """Returns the device's IP address on the network."""
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            s.close()
-            return ip
-        except Exception:
-            return "Unknown"
-
-    def get_pi_model(self):
-        try:
-            with open('/sys/firmware/devicetree/base/model', 'r') as f:
-                return f.read().strip()
-        except Exception:
-            return "Unknown"
-
-    def get_free_ram(self):
-        try:
-            result = subprocess.run(['free', '-m'], capture_output=True, text=True)
-            lines = result.stdout.split('\n')
-            mem_line = [line for line in lines if line.startswith('Mem:')][0]
-            free_mem = int(mem_line.split()[3])
-            return free_mem
-        except Exception:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except:
             return "Unknown"
 
     def get_uptime(self):
+        """Returns the system uptime in days, hours, and minutes."""
         try:
             with open('/proc/uptime', 'r') as f:
-                uptime_seconds = float(f.read().split()[0])
-            days = int(uptime_seconds // (24 * 3600))
-            hours = int((uptime_seconds % (24 * 3600)) // 3600)
-            minutes = int((uptime_seconds % 3600) // 60)
+                uptime_seconds = float(f.readline().split()[0])
+            uptime_timedelta = timedelta(seconds=uptime_seconds)
+            days = uptime_timedelta.days
+            hours, remainder = divmod(uptime_timedelta.seconds, 3600)
+            minutes, _ = divmod(remainder, 60)
             return f"{days}d {hours}h {minutes}m"
-        except Exception:
+        except FileNotFoundError:
             return "Unknown"
 
-    def estimate_battery_runtime(self):
-        if len(self.power_readings) < self.power_readings.maxlen:
-            return None
-        avg_power_W = sum(self.power_readings) / len(self.power_readings)
-        if avg_power_W < 0.1:
-            return None
-        avg_power_mW = avg_power_W * 1000
-        energy_mWh = self.battery_capacity_mAh * self.battery_voltage
-        runtime_hours = energy_mWh / avg_power_mW
-        return runtime_hours
-
-    def send_ntfy_notification(self, event_type, power, percent, current):
-        global HAS_REQUESTS
-        if not self.enable_ntfy or not HAS_REQUESTS:
-            log_message("INFO", f"ntfy notification ({event_type}) skipped: {'ntfy disabled' if not self.enable_ntfy else 'python3-requests not installed'}", exit_on_error=False)
-            return
-        current_time = datetime.now()
-        if self.last_notification is not None and (current_time - self.last_notification) < self.notification_cooldown:
-            if event_type in ["unplugged", "reconnected"]:
-                self.notification_queue.append((current_time, event_type, power, percent, current))
-                log_message("INFO", f"Notification ({event_type}) queued due to cooldown. Queue size: {len(self.notification_queue)}")
-            else:
-                log_message("INFO", f"Notification ({event_type}) skipped due to cooldown. Will send after {self.notification_cooldown.total_seconds() - (current_time - self.last_notification).total_seconds():.1f} seconds")
-            return
-
-        hostname = self.get_hostname()
-        ip = self.get_ip_address()
-        cpu_temp = self.get_cpu_temp()
-        gpu_temp = self.get_gpu_temp()
-        temp_info = (
-            f"CPU: {cpu_temp:.1f}°C, GPU: {gpu_temp:.1f}°C"
-            if cpu_temp is not None and gpu_temp is not None
-            else "Temp unavailable"
-        )
-        message = None
-        title = None
-        if event_type == "unplugged":
-            runtime = self.estimate_battery_runtime()
-            runtime_str = f"{runtime:.1f} hours" if runtime else "unknown"
-            message = f"⚠️🔌 USB Charger Unplugged on {hostname} (IP: {ip}): Running on battery, estimated runtime {runtime_str}, {percent:.1f}% ({power:.3f} W), Temps: {temp_info}"
-            title = "Presto UPS Unplugged"
-            self.is_unplugged = True
-            self.low_power_notified = False
-            self.low_percent_notified = False
-        elif event_type == "reconnected":
-            message = f"✅🔋 USB Charger Reconnected on {hostname} (IP: {ip}): System back on external power, {percent:.1f}% ({power:.3f} W), Temps: {temp_info}"
-            title = "Presto UPS Reconnected"
-            self.is_unplugged = False
-            self.low_power_notified = False
-            self.low_percent_notified = False
-        elif event_type == "low_power":
-            message = f"🪫 Low Power Alert on {hostname} (IP: {ip}): {power:.3f} W (Threshold: {self.power_threshold} W), {percent:.1f}%, Temps: {temp_info}"
-            title = "Presto UPS Low Power"
-            self.low_power_notified = True
-        elif event_type == "low_percent":
-            message = f"🪫 Low Percent Alert on {hostname} (IP: {ip}): {percent:.1f}% (Threshold: {self.percent_threshold}%), {power:.3f} W, Temps: {temp_info}"
-            title = "Presto UPS Low Percent"
-            self.low_percent_notified = True
-        if message:
-            try:
-                requests.post(
-                    f"{self.ntfy_server}/{self.ntfy_topic}",
-                    data=message.encode('utf-8'),
-                    headers={"Title": title.encode('utf-8')}
-                )
-                log_message("INFO", f"Notification sent: {message}")
-                self.last_notification = current_time
-            except Exception as e:
-                log_message("ERROR", f"Failed to send notification: {e}", exit_on_error=False)
-
-    def process_notification_queue(self):
-        global HAS_REQUESTS
-        if not self.enable_ntfy or not HAS_REQUESTS or not self.notification_queue or self.last_notification is None:
-            return
-        current_time = datetime.now()
-        if (current_time - self.last_notification) >= self.notification_cooldown:
-            self.notification_queue.sort(key=lambda x: x[0], reverse=True)
-            events_to_send = self.notification_queue[:2]
-            extra_events = len(self.notification_queue) - 2 if len(self.notification_queue) > 2 else 0
-            for i, (timestamp, event_type, power, percent, current) in enumerate(events_to_send):
-                hostname = self.get_hostname()
-                ip = self.get_ip_address()
-                cpu_temp = self.get_cpu_temp()
-                gpu_temp = self.get_gpu_temp()
-                temp_info = (
-                    f"CPU: {cpu_temp:.1f}°C, GPU: {gpu_temp:.1f}°C"
-                    if cpu_temp is not None and gpu_temp is not None
-                    else "Temp unavailable"
-                )
-                message = None
-                title = None
-                if event_type == "unplugged":
-                    runtime = self.estimate_battery_runtime()
-                    runtime_str = f"{runtime:.1f} hours" if runtime else "unknown"
-                    message = f"⚠️🔌 USB Charger Unplugged on {hostname} (IP: {ip}): Running on battery, estimated runtime {runtime_str}, {percent:.1f}% ({power:.3f} W), Temps: {temp_info}"
-                    title = "Presto UPS Unplugged"
-                elif event_type == "reconnected":
-                    message = f"✅🔋 USB Charger Reconnected on {hostname} (IP: {ip}): System back on external power, {percent:.1f}% ({power:.3f} W), Temps: {temp_info}"
-                    title = "Presto UPS Reconnected"
-                if extra_events > 0 and i == 1:
-                    message += f"\n...+{extra_events} similar events, please check journal"
-                if message and title:
-                    try:
-                        requests.post(
-                            f"{self.ntfy_server}/{self.ntfy_topic}",
-                            data=message.encode('utf-8'),
-                            headers={"Title": title.encode('utf-8')}
-                        )
-                        log_message("INFO", f"Queued notification sent: {message}")
-                        self.last_notification = current_time
-                    except Exception as e:
-                        log_message("ERROR", f"Failed to send queued notification: {e}", exit_on_error=False)
-            self.notification_queue = []
-            log_message("INFO", "Notification queue cleared")
-
-def log_message(log_level, console_message, log_file_message=None, exit_on_error=True):
-    if log_level == "DEBUG" and not DEBUG_ENABLED:
-        return
-    if log_file_message is None:
-        log_file_message = console_message
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    journal_message = f"[{timestamp}] [presto-UPSc-service] [{log_level}] {log_file_message}"
-    valid_priorities = ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"]
-    priority = log_level.lower() if log_level.lower() in valid_priorities else "info"
-    try:
-        subprocess.run(
-            ["systemd-cat", "-t", "presto_ups", "-p", priority],
-            input=journal_message,
-            text=True,
-            check=True
-        )
-    except subprocess.CalledProcessError as e:
-        print(f"[presto-UPSc-service] [ERROR] Failed to log to journald: {e}", file=sys.stderr)
-    if sys.stdin.isatty():
-        color = {"INFO": COL_INFO, "WARNING": COL_WARNING, "ERROR": COL_ERROR, "DEBUG": COL_INFO}.get(log_level, COL_NC)
-        print(f"[presto-UPSc-service] {color}[{log_level}]{COL_NC} {console_message}")
-    if log_level == "ERROR" and exit_on_error:
-        sys.exit(1)
-
-def check_service_running():
-    try:
-        result = subprocess.run(["systemctl", "is-active", "--quiet", "presto_ups"], check=False)
-        if result.returncode == 0:
-            ps_result = subprocess.run(["ps", "aux"], capture_output=True, text=True)
-            current_pid = str(os.getpid())
-            for line in ps_result.stdout.splitlines():
-                if "presto_hatc_monitor.py" in line and current_pid not in line:
-                    log_message("DEBUG", f"Found running presto_ups process: {line}")
-                    return True
-        return False
-    except subprocess.CalledProcessError as e:
-        log_message("WARNING", f"Failed to check service status: {e.stderr}", exit_on_error=False)
-        return False
-
-def check_dependencies(requires_i2c=True):
-    global HAS_REQUESTS
-    log_message("INFO", f"Checking dependencies for user {USER}")
-    smbus_module, bus = None, None
-    HAS_REQUESTS = False
-
-    if not os.path.exists("/usr/bin/python3"):
-        log_message("ERROR", "python3 is not installed. Please install it with 'sudo apt install python3'")
-        return None, None
-
-    log_message("INFO", f"Python3 is installed: {subprocess.getoutput('python3 --version')}")
-
-    try:
-        import requests
-        log_message("INFO", "python3-requests is installed")
-        HAS_REQUESTS = True
-    except ImportError:
-        log_message("INFO", "python3-requests is not installed. ntfy notifications disabled", exit_on_error=False)
-
-    if requires_i2c:
+    def get_ram_info(self):
+        """Returns free RAM in MB."""
         try:
-            import smbus as smbus_module
-            log_message("INFO", "python3-smbus is installed")
-            try:
-                bus = smbus_module.SMBus(1)
-                bus.read_byte(0x43)  # Default addr
-                log_message("INFO", "smbus module is functional")
-            except Exception as e:
-                log_message("ERROR", f"smbus module failed to access I2C bus: {e}")
-                return smbus_module, None
-        except ImportError:
-            log_message("ERROR", "python3-smbus is not installed. Please install it with 'sudo apt install python3-smbus'")
-            return None, None
+            with open('/proc/meminfo', 'r') as f:
+                mem_info = f.read()
+            for line in mem_info.splitlines():
+                if 'MemFree:' in line:
+                    free_mem_kb = int(line.split()[1])
+                    return f"{free_mem_kb // 1024} MB"
+        except FileNotFoundError:
+            return "Unknown"
+    
+    def get_cpu_temp(self):
+        """Returns CPU temperature in Celsius."""
+        try:
+            temp_output = subprocess.check_output(["vcgencmd", "measure_temp"]).decode()
+            return float(temp_output.split('=')[1].split("'")[0])
+        except (subprocess.CalledProcessError, IndexError, ValueError):
+            return None
 
-    if os.path.exists("/usr/bin/vcgencmd"):
-        log_message("INFO", "libraspberrypi-bin is installed")
-    else:
-        log_message("WARNING", "libraspberrypi-bin not installed, GPU temp unavailable", exit_on_error=False)
+    def get_gpu_temp(self):
+        """Returns GPU temperature in Celsius."""
+        try:
+            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
+                temp_raw = f.read()
+            return int(temp_raw) / 1000.0
+        except (IOError, ValueError):
+            return None
+    
+    def get_time_on_battery(self):
+        """Returns formatted string of time on battery, or None if plugged in."""
+        if self.unplugged_start_time is None:
+            return None
+        
+        duration_seconds = time.time() - self.unplugged_start_time
+        duration_timedelta = timedelta(seconds=duration_seconds)
+        days = duration_timedelta.days
+        hours, remainder = divmod(duration_timedelta.seconds, 3600)
+        minutes, _ = divmod(remainder, 60)
+        
+        return f"{days}d {hours}h {minutes}m"
 
-    if not os.path.exists("/usr/bin/systemd-cat"):
-        log_message("ERROR", "systemd-cat is not installed. Please install systemd")
+    def get_estimated_time_remaining(self, percent, current_mA):
+        """Estimates time remaining on battery based on current draw."""
+        if current_mA >= 0:
+            return None # Not discharging
+        
+        mAh_remaining = self.battery_capacity_mah * (percent / 100)
+        discharge_current_mA = abs(current_mA)
+        
+        if discharge_current_mA == 0:
+            return None # Avoid division by zero
+        
+        hours_remaining = mAh_remaining / discharge_current_mA
+        
+        # Convert to hours, minutes format
+        minutes_remaining = int(hours_remaining * 60)
+        hours = minutes_remaining // 60
+        minutes = minutes_remaining % 60
+        
+        return f"{hours}h {minutes}m"
+        
+    def send_ntfy_notification(self, event_type, power, percent, current_mA):
+        """Sends an ntfy notification if enabled and not on cooldown."""
+        if not self.enable_ntfy or requests is None:
+            log_message("INFO", f"ntfy notification ({event_type}) skipped: ntfy disabled")
+            return
+            
+        # Implement cooldown unless it's a critical event or a state change
+        current_time = time.time()
+        is_cooldown_event = event_type in ["low_power", "low_percent"]
+        if is_cooldown_event and (current_time - self.last_ntfy_notification_time) < self.ntfy_cooldown_seconds:
+            log_message("INFO", f"ntfy notification ({event_type}) skipped: on cooldown", exit_on_error=False)
+            return
+            
+        try:
+            hostname = self.get_hostname()
+            time_on_battery_str = self.get_time_on_battery()
+            time_remaining_str = self.get_estimated_time_remaining(percent, current_mA)
+            
+            # Additional info for the messages
+            battery_info = f"Time on Battery: {time_on_battery_str}" if time_on_battery_str else "Time on Battery: N/A"
+            eta_info = f"ETA: {time_remaining_str}" if time_remaining_str else "ETA: N/A"
 
-    return smbus_module, bus
-
-def enable_i2c():
-    log_message("INFO", "Checking I2C status")
-    with open("/boot/config.txt", "r") as f:
-        if "dtparam=i2c_arm=on" in f.read():
-            log_message("INFO", "I2C is already enabled")
-        else:
-            log_message("INFO", "Enabling I2C via raspi-config")
-            result = subprocess.run(["raspi-config", "nonint", "do_i2c", "0"], capture_output=True, text=True)
-            if result.returncode == 0:
-                log_message("INFO", "I2C enabled successfully")
+            # Prepare notification payload based on event type
+            if event_type == "unplugged":
+                message = f"🔌 Power Unplugged on {hostname}. Running on Battery! Current: {current_mA/1000:.2f}A, Power: {power:.2f}W, Battery: {percent:.1f}%. {eta_info}"
+                title = "Power Unplugged"
+                priority = 4
+                tags = "unplugged"
+            elif event_type == "reconnected":
+                message = f"✅ Power Reconnected on {hostname}. Battery is charging. {battery_info}"
+                title = "Power Reconnected"
+                priority = 3
+                tags = "reconnected"
+            elif event_type == "low_power":
+                message = f"🪫 Low Power Alert on {hostname}! Power draw is below {self.power_threshold}W. Current: {current_mA/1000:.2f}A, Power: {power:.2f}W, Battery: {percent:.1f}%. {eta_info}"
+                title = "Low Power Alert"
+                priority = 4
+                tags = "low_power,warning"
+            elif event_type == "low_percent":
+                message = f"🪫 Low Battery Alert on {hostname}! Battery is at {percent:.1f}%. Current: {current_mA/1000:.2f}A, Power: {power:.2f}W. {eta_info}"
+                title = "Low Battery Alert"
+                priority = 5
+                tags = "low_battery,warning"
+            elif event_type == "critical_low":
+                message = f"🔴 CRITICAL LOW BATTERY on {hostname}! Battery at {percent:.1f}%. Shutdown in {self.critical_shutdown_delay} seconds if not reconnected. {eta_info}"
+                title = "CRITICAL LOW BATTERY"
+                priority = 5
+                tags = "critical_low,warning"
+            elif event_type == "test":
+                message = f"This is a simple test notification from {hostname}."
+                title = "Test Notification"
+                priority = 3
+                tags = "test"
+            elif event_type == "test_info":
+                message = f"✅ Presto UPS Monitor Test Notification from {hostname}\n\n- V:    {self.getBusVoltage_V():.2f} V\n- I:    {self.getCurrent_mA()/1000:.2f} A\n- W:    {self.getPower_W():.2f} W\n- P:    {self.get_percent(self.getBusVoltage_V()):.1f}%\n- Hostname:  {self.get_hostname()}\n- IP Address:  {self.get_ip_address()}\n- Uptime:    {self.get_uptime()}\n- Free RAM:  {self.get_ram_info()}\n- CPU Temp:  {self.get_cpu_temp():.1f} °C"
+                title = "Test Notification - Full Report"
+                priority = 3
+                tags = "test,info"
             else:
-                log_message("ERROR", "Failed to enable I2C. Please enable manually via 'sudo raspi-config'")
+                return # Do nothing for unhandled events
 
-def check_i2c_device(i2c_addr):
-    if os.path.exists("/usr/sbin/i2cdetect"):
-        log_message("INFO", f"Checking for INA219 at address {i2c_addr}")
-        result = subprocess.run(["i2cdetect", "-y", "1"], capture_output=True, text=True)
-        if i2c_addr[2:].lower() in result.stdout:
-            log_message("INFO", f"INA219 detected at address {i2c_addr}")
-        else:
-            log_message("WARNING", f"INA219 not detected at address {i2c_addr}. Check wiring and address")
-    else:
-        log_message("WARNING", f"i2cdetect not found, cannot verify INA219 at address {i2c_addr}")
+            url = f"https://{self.ntfy_server}/{self.ntfy_topic}"
+            headers = {
+                "Title": title,
+                "Priority": str(priority),
+                "Tags": tags
+            }
+            
+            requests.post(url, data=message.encode('utf-8'), headers=headers)
+            log_message("INFO", f"ntfy notification ({event_type}) sent successfully")
+            
+            # Update last notification time for cooldown events
+            if is_cooldown_event:
+                self.last_ntfy_notification_time = current_time
 
-def install_as_service(args):
+        except Exception as e:
+            log_message("ERROR", f"Failed to send ntfy notification for '{event_type}': {e}", exit_on_error=False)
+
+def install_as_service(script_path, args):
+    """Installs the script as a systemd service with detailed output."""
     if os.geteuid() != 0:
-        log_message("ERROR", "Service installation must be run as root")
-    log_message("INFO", f"Installing Presto UPS HAT monitor service for user {USER}")
+        log_message("ERROR", "Service installation requires root privileges. Please run with 'sudo'.")
 
-    service_file = "/etc/systemd/system/presto_ups.service"
-    target_script = "/usr/local/bin/presto_hatc_monitor.py"
-    service_exists = os.path.exists(service_file)
-    service_running = False
-    service_status = "unknown"
-
-    if service_exists:
-        log_message("WARNING", "presto_ups service is already installed")
-        try:
-            result = subprocess.run(["systemctl", "is-active", "--quiet", "presto_ups"], check=False)
-            service_running = result.returncode == 0
-            if service_running:
-                log_message("WARNING", "presto_ups service is currently running")
-            else:
-                log_message("INFO", "presto_ups service is installed but not running")
-            result = subprocess.run(["systemctl", "status", "presto_ups.service"], capture_output=True, text=True)
-            service_status = result.stdout
-        except subprocess.CalledProcessError as e:
-            log_message("WARNING", f"Failed to check service status: {e.stderr}", exit_on_error=False)
-
-    if service_exists and sys.stdin.isatty():
-        log_message("INFO", f"Current service status:\n{service_status}")
-        log_message("INFO", f"New settings: addr={args.addr}, enable-ntfy={args.enable_ntfy}, ntfy-server={args.ntfy_server}, ntfy-topic={args.ntfy_topic}, power-threshold={args.power_threshold}, percent-threshold={args.percent_threshold}, battery-capacity={args.battery_capacity}, battery-voltage={args.battery_voltage}")
-        try:
-            response = input("[presto-UPSc-service] [INFO] Would you like to reinstall with new settings? (y/n): ").strip().lower()
-            if response != 'y':
-                log_message("INFO", "Installation aborted by user")
-                sys.exit(0)
-        except KeyboardInterrupt:
-            log_message("INFO", "Installation aborted by user")
+    log_message("INFO", "Starting Presto UPS Monitor service installation.")
+    
+    # Backup existing service file if it exists and ask for confirmation
+    if os.path.exists(SERVICE_FILE_PATH):
+        confirmation = input(f"❗ A service file already exists at {SERVICE_FILE_PATH}.\n   Do you want to overwrite it? (y/n): ")
+        if confirmation.lower() not in ['y', 'yes']:
+            log_message("INFO", "Installation cancelled by user.")
             sys.exit(0)
 
-    if service_exists:
-        log_message("INFO", "Ensuring presto_ups service is stopped and reset")
-        try:
-            if service_running:
-                subprocess.run(["systemctl", "stop", "presto_ups.service"], check=True)
-                log_message("INFO", "Service stopped successfully")
-            subprocess.run(["systemctl", "disable", "presto_ups.service"], check=True)
-            log_message("INFO", "Service disabled successfully")
-            # Check if the service is loaded before attempting reset-failed
-            result = subprocess.run(["systemctl", "list-units", "--full", "-all"], capture_output=True, text=True)
-            if "presto_ups.service" in result.stdout:
-                try:
-                    subprocess.run(["systemctl", "reset-failed", "presto_ups.service"], check=True)
-                    log_message("INFO", "Service failed state reset successfully")
-                except subprocess.CalledProcessError as e:
-                    log_message("WARNING", f"Failed to reset failed state: {e.stderr}", exit_on_error=False)
-            else:
-                log_message("INFO", "Skipping reset-failed as service is not loaded")
-            time.sleep(1)
-        except subprocess.CalledProcessError as e:
-            log_message("ERROR", f"Failed to stop or disable service: {e.stderr}", exit_on_error=False)
-
-    # Kill any residual processes
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        backup_path = f"{SERVICE_FILE_PATH}.bak_{timestamp}"
+        log_message("INFO", f"Existing service file found. Creating backup at {backup_path}...")
+        shutil.copyfile(SERVICE_FILE_PATH, backup_path)
+        log_message("INFO", "Backup created.")
+    
+    service_content = SERVICE_TEMPLATE.format(
+        script_path=script_path,
+        ntfy_server=args.ntfy_server,
+        ntfy_topic=args.ntfy_topic,
+        power_threshold=args.power_threshold,
+        percent_threshold=args.percent_threshold,
+        critical_low_threshold=args.critical_low_threshold,
+        critical_shutdown_delay=args.critical_shutdown_delay,
+        battery_capacity_mah=args.battery_capacity_mah,
+        ntfy_cooldown_seconds=args.ntfy_cooldown_seconds
+    )
+    
     try:
-        ps_result = subprocess.run(["ps", "aux"], capture_output=True, text=True)
-        current_pid = str(os.getpid())
-        for line in ps_result.stdout.splitlines():
-            if "presto_hatc_monitor.py" in line and "--install_as_service" not in line and current_pid not in line:
-                pid = line.split()[1]
-                log_message("INFO", f"Terminating residual presto_ups process: PID {pid}")
-                subprocess.run(["kill", "-9", pid], check=True)
-    except subprocess.CalledProcessError as e:
-        log_message("WARNING", f"Failed to terminate residual processes: {e.stderr}", exit_on_error=False)
-
-    try:
-        log_message("INFO", f"Copying script to {target_script}")
-        if os.path.exists(target_script):
-            backup_script = f"{target_script}.bak"
-            log_message("INFO", f"Backing up existing script to {backup_script}")
-            subprocess.run(["cp", target_script, backup_script], check=True)
-        subprocess.run(["cp", os.path.abspath(__file__), target_script], check=True)
-        subprocess.run(["chmod", "755", target_script], check=True)
-        subprocess.run(["chown", f"{USER}:{USER}", target_script], check=True)
-        log_message("INFO", f"Script copied successfully to {target_script}")
-    except subprocess.CalledProcessError as e:
-        log_message("ERROR", f"Failed to copy script to {target_script}: {e.stderr}")
-
-    exec_start = f"/usr/bin/python3 {target_script} --addr {args.addr} --power-threshold {args.power_threshold} --percent-threshold {args.percent_threshold} --battery-capacity {args.battery_capacity} --battery-voltage {args.battery_voltage}"
-    if args.enable_ntfy:
-        exec_start += f" --enable-ntfy --ntfy-server {args.ntfy_server} --ntfy-topic {args.ntfy_topic}"
-    if args.debug:
-        exec_start += " --debug"
-    service_content = f"""[Unit]
-Description=Raspberry Pi Presto UPS Monitor Service
-After=network.target
-
-[Service]
-ExecStart={exec_start}
-WorkingDirectory=/usr/local/bin
-StandardOutput=journal
-StandardError=journal
-Restart=on-failure
-RestartSec=10
-User={USER}
-
-[Install]
-WantedBy=multi-user.target
-"""
-    try:
-        with open(service_file, "w") as f:
+        log_message("INFO", f"Creating new service file at {SERVICE_FILE_PATH}...")
+        with open(SERVICE_FILE_PATH, "w") as f:
             f.write(service_content)
-        subprocess.run(["chmod", "644", service_file], check=True)
-        log_message("INFO", "Service file created successfully")
-    except Exception as e:
-        log_message("ERROR", f"Failed to create service file {service_file}: {e}")
+        log_message("INFO", "Service file created successfully.")
 
-    try:
-        subprocess.run(["systemctl", "daemon-reload"], check=True)
-        subprocess.run(["systemctl", "enable", "presto_ups.service"], check=True)
-        subprocess.run(["systemctl", "start", "presto_ups.service"], check=True)
+        # Show the user the new file content
+        log_message("INFO", "--- NEW SERVICE FILE CONTENT ---")
+        print(service_content.strip())
+        log_message("INFO", "--------------------------------")
+
+        log_message("INFO", "Reloading systemd daemon...")
+        subprocess.run(["sudo", "systemctl", "daemon-reload"], check=True)
+        log_message("INFO", "Daemon reloaded.")
+
+        log_message("INFO", f"Enabling {SERVICE_NAME} to run on boot...")
+        subprocess.run(["sudo", "systemctl", "enable", SERVICE_NAME], check=True)
+        log_message("INFO", f"{SERVICE_NAME} enabled.")
+        
+        log_message("INFO", f"Starting {SERVICE_NAME}...")
+        subprocess.run(["sudo", "systemctl", "start", SERVICE_NAME], check=True)
+        log_message("INFO", f"{SERVICE_NAME} started.")
+
+        # Final status check
+        log_message("INFO", f"Checking service status...")
+        status_check = subprocess.run(["sudo", "systemctl", "is-active", SERVICE_NAME], capture_output=True, text=True)
+        if status_check.returncode == 0:
+            log_message("SUCCESS", "✅ Installation complete. The service is now active and running.")
+        else:
+            log_message("ERROR", "Installation finished, but the service is not active. Please check with 'sudo systemctl status presto_ups.service'")
+            log_message("ERROR", f"Output: {status_check.stdout.strip()}")
+            log_message("ERROR", f"Error: {status_check.stderr.strip()}")
+            sys.exit(1)
+            
     except subprocess.CalledProcessError as e:
-        log_message("ERROR", f"Failed to set up service: {e}")
-
-    log_message("INFO", "Checking service status")
-    result = subprocess.run(["systemctl", "is-active", "--quiet", "presto_ups"], check=False)
-    if result.returncode == 0:
-        log_message("INFO", "Service presto_ups is running successfully")
-        log_message("INFO", "Recent service logs:")
-        subprocess.run(["journalctl", "-u", "presto_ups", "-n", "10", "--no-pager"], check=False)
-        log_message("INFO", "Service status details:")
-        subprocess.run(["systemctl", "status", "presto_ups", "--no-pager"], check=False)
-    else:
-        log_message("ERROR", "Service presto_ups failed to start")
-        log_message("INFO", "Service status details:")
-        subprocess.run(["systemctl", "status", "presto_ups", "--no-pager"], check=False)
-        log_message("INFO", "Recent service logs:")
-        subprocess.run(["journalctl", "-u", "presto_ups", "-n", "10", "--no-pager"], check=False)
-        sys.exit(1)
-
-    log_message("INFO", "Service Management Tips:")
-    log_message("INFO", "  - Check recent voltage/current logs: journalctl -u presto_ups.service | grep -E \"Voltage|Current|Power|Percent\" -m 10")
-    log_message("INFO", "  - Check power events: journalctl -u presto_ups.service | grep -E \"unplugged|reconnected|Low power|Low percent\" -m 10")
-    log_message("INFO", "  - Check critical errors: journalctl -u presto_ups.service -p 0..3 -n 10")
-    log_message("INFO", "  - Check debug logs (if enabled): journalctl -u presto_ups.service | grep DEBUG -m 10")
-    log_message("INFO", "  - Uninstall service: sudo {} --uninstall".format(os.path.basename(__file__)))
-    reinstall_cmd = f"sudo {os.path.basename(__file__)} --install_as_service --addr {args.addr} --power-threshold {args.power_threshold} --percent-threshold {args.percent_threshold} --battery-capacity {args.battery_capacity} --battery-voltage {args.battery_voltage}"
-    if args.enable_ntfy:
-        reinstall_cmd += f" --enable-ntfy --ntfy-server {args.ntfy_server} --ntfy-topic {args.ntfy_topic}"
-    if args.debug:
-        reinstall_cmd += " --debug"
-    log_message("INFO", f"  - Reinstall with current settings: {reinstall_cmd}")
-    log_message("INFO", "Installation complete")
-    sys.exit(0)
+        log_message("ERROR", f"Failed to install service. A command returned an error: {e}", exit_on_error=True)
+    except Exception as e:
+        log_message("ERROR", f"An unexpected error occurred during service installation: {e}", exit_on_error=True)
 
 def uninstall_service():
+    """Uninstalls the systemd service with a more robust error handling."""
     if os.geteuid() != 0:
-        log_message("ERROR", "Service uninstallation must be run as root")
-    log_message("INFO", f"Uninstalling Presto UPS monitor service for user {USER}")
+        log_message("ERROR", "Service uninstallation requires root privileges. Please run with 'sudo'.")
 
-    service_file = "/etc/systemd/system/presto_ups.service"
-    target_script = "/usr/local/bin/presto_hatc_monitor.py"
-    service_exists = False
-    service_running = False
-    service_status = "unknown"
+    log_message("INFO", "Starting Presto UPS Monitor service uninstallation.")
 
-    # Check if service is loaded in systemd
     try:
-        result = subprocess.run(["systemctl", "list-units", "--full", "-all"], capture_output=True, text=True)
-        if "presto_ups.service" in result.stdout:
-            service_exists = True
-            log_message("INFO", "presto_ups service is loaded in systemd")
-        result = subprocess.run(["systemctl", "is-active", "--quiet", "presto_ups"], check=False)
-        service_running = result.returncode == 0
-        if service_running:
-            log_message("WARNING", "presto_ups service is currently running")
+        # Stop the service (do not crash if it's already stopped)
+        log_message("INFO", f"Stopping {SERVICE_NAME}...")
+        stop_result = subprocess.run(["sudo", "systemctl", "stop", SERVICE_NAME], check=False)
+        if stop_result.returncode == 0:
+            log_message("INFO", f"{SERVICE_NAME} stopped successfully.")
+        elif stop_result.returncode == 5:
+            log_message("WARNING", f"Service {SERVICE_NAME} was not loaded. Skipping stop command.", exit_on_error=False)
         else:
-            log_message("INFO", "presto_ups service is loaded but not running")
-        result = subprocess.run(["systemctl", "status", "presto_ups.service"], capture_output=True, text=True)
-        service_status = result.stdout
-    except subprocess.CalledProcessError as e:
-        log_message("WARNING", f"Failed to check service status: {e.stderr}", exit_on_error=False)
+            log_message("ERROR", f"Failed to stop {SERVICE_NAME}. Exit code: {stop_result.returncode}", exit_on_error=True)
 
-    # Check if service file exists
-    if os.path.exists(service_file):
-        service_exists = True
-        log_message("INFO", f"Service file found: {service_file}")
-    else:
-        log_message("INFO", f"Service file not found: {service_file}")
-
-    if not service_exists:
-        log_message("INFO", "presto_ups service is not installed or loaded")
-        # Still attempt to clean up any residual files or processes
-        try:
-            if os.path.exists(target_script):
-                subprocess.run(["rm", "-f", target_script], check=True)
-                log_message("INFO", f"Script removed: {target_script}")
-            subprocess.run(["systemctl", "daemon-reload"], check=True)
-            log_message("INFO", "Systemd daemon reloaded successfully")
-            # Reset failed state for good measure
-            subprocess.run(["systemctl", "reset-failed", "presto_ups.service"], check=False)
-        except subprocess.CalledProcessError as e:
-            log_message("WARNING", f"Failed to clean up residual files or reload daemon: {e.stderr}", exit_on_error=False)
-        log_message("INFO", "Uninstallation complete. No service was loaded or installed.")
-        sys.exit(0)
-
-    if service_exists and sys.stdin.isatty():
-        log_message("INFO", f"Current service status:\n{service_status}")
-        try:
-            response = input("[presto-UPSc-service] [INFO] Would you like to uninstall the presto_ups service? (y/n): ").strip().lower()
-            if response != 'y':
-                log_message("INFO", "Uninstallation aborted by user")
-                sys.exit(0)
-        except KeyboardInterrupt:
-            log_message("INFO", "Uninstallation aborted by user")
-            sys.exit(0)
-
-    # Stop and disable the service if running
-    if service_running:
-        log_message("INFO", "Stopping presto_ups service")
-        try:
-            subprocess.run(["systemctl", "stop", "presto_ups.service"], check=True)
-            log_message("INFO", "Service stopped successfully")
-        except subprocess.CalledProcessError as e:
-            log_message("ERROR", f"Failed to stop service: {e.stderr}", exit_on_error=False)
-        try:
-            subprocess.run(["systemctl", "disable", "presto_ups.service"], check=True)
-            log_message("INFO", "Service disabled successfully")
-        except subprocess.CalledProcessError as e:
-            log_message("ERROR", f"Failed to disable service: {e.stderr}", exit_on_error=False)
-
-    # Remove the service file
-    if os.path.exists(service_file):
-        try:
-            subprocess.run(["rm", "-f", service_file], check=True)
-            log_message("INFO", f"Service file removed: {service_file}")
-        except subprocess.CalledProcessError as e:
-            log_message("ERROR", f"Failed to remove service file: {e.stderr}", exit_on_error=False)
-
-    # Reload systemd daemon (first pass)
-    try:
-        subprocess.run(["systemctl", "daemon-reload"], check=True)
-        log_message("INFO", "Systemd daemon reloaded successfully")
-    except subprocess.CalledProcessError as e:
-        log_message("ERROR", f"Failed to reload systemd daemon: {e.stderr}", exit_on_error=False)
-
-    # Remove the script file
-    if os.path.exists(target_script):
-        try:
-            subprocess.run(["rm", "-f", target_script], check=True)
-            log_message("INFO", f"Script removed: {target_script}")
-        except subprocess.CalledProcessError as e:
-            log_message("ERROR", f"Failed to remove script: {e.stderr}", exit_on_error=False)
-
-    # Second pass to ensure systemd fully purges the unit
-    try:
-        subprocess.run(["systemctl", "daemon-reload"], check=True)
-        subprocess.run(["systemctl", "reset-failed", "presto_ups.service"], check=False)
-        log_message("INFO", "Systemd daemon reloaded again to ensure unit cleanup")
-    except subprocess.CalledProcessError as e:
-        log_message("WARNING", f"Failed to reload systemd daemon or reset failed state: {e.stderr}", exit_on_error=False)
-
-    # Verify service is no longer loaded
-    try:
-        result = subprocess.run(["systemctl", "list-units", "--full", "-all"], capture_output=True, text=True)
-        if "presto_ups.service" not in result.stdout:
-            log_message("INFO", "presto_ups service is no longer loaded in systemd")
+        # Disable the service (do not crash if it's already disabled)
+        log_message("INFO", f"Disabling {SERVICE_NAME}...")
+        disable_result = subprocess.run(["sudo", "systemctl", "disable", SERVICE_NAME], check=False)
+        if disable_result.returncode == 0:
+            log_message("INFO", f"{SERVICE_NAME} disabled successfully.")
+        elif disable_result.returncode == 1:
+            log_message("WARNING", f"Service {SERVICE_NAME} was already disabled. Skipping disable command.", exit_on_error=False)
         else:
-            log_message("WARNING", "presto_ups service is still loaded in systemd, manual cleanup may be required")
-            log_message("INFO", "Run the following commands to clean up:")
-            log_message("INFO", "  sudo systemctl daemon-reload")
-            log_message("INFO", "  sudo systemctl reset-failed presto_ups.service")
+            log_message("ERROR", f"Failed to disable {SERVICE_NAME}. Exit code: {disable_result.returncode}", exit_on_error=True)
+
+        log_message("INFO", f"Removing service file {SERVICE_FILE_PATH}...")
+        os.remove(SERVICE_FILE_PATH)
+        log_message("INFO", "Service file removed.")
+        
+        log_message("INFO", "Reloading systemd daemon...")
+        subprocess.run(["sudo", "systemctl", "daemon-reload"], check=True)
+        log_message("INFO", "Daemon reloaded.")
+
+        log_message("SUCCESS", "✅ Service uninstalled successfully.")
+        
+    except FileNotFoundError:
+        log_message("WARNING", f"Service file not found at {SERVICE_FILE_PATH}. Was it already removed?", exit_on_error=False)
+        log_message("SUCCESS", "✅ Uninstallation complete (service file was already gone).")
     except subprocess.CalledProcessError as e:
-        log_message("WARNING", f"Failed to verify service removal: {e.stderr}", exit_on_error=False)
-
-    log_message("INFO", "Uninstallation complete. You can now run the script interactively.")
-    sys.exit(0)
-
-def test_ntfy(ntfy_server, ntfy_topic):
-    log_message("INFO", "Testing ntfy connectivity")
-    monitor = PrestoMonitor(enable_ntfy=True, ntfy_server=ntfy_server, ntfy_topic=ntfy_topic)
-    hostname = monitor.get_hostname()
-    ip = monitor.get_ip_address()
-    message = f"🌟 Presto UPS Test Notification\nHostname: {hostname}\nIP: {ip}\nModel: {monitor.get_pi_model()}\nFree RAM: {monitor.get_free_ram()} MB\nUptime: {monitor.get_uptime()}\n◕‿◕"
-    title = "Presto UPS Test Alert"
-    try:
-        requests.post(
-            f"{ntfy_server}/{ntfy_topic}",
-            data=message.encode('utf-8'),
-            headers={"Title": title.encode('utf-8')}
-        )
-        log_message("INFO", f"ntfy test notification sent successfully. Check your topic ({ntfy_server}/{ntfy_topic})")
+        log_message("ERROR", f"Failed to uninstall service. A command returned an error: {e}", exit_on_error=True)
     except Exception as e:
-        log_message("WARNING", f"Failed to send test ntfy notification: {e}")
+        log_message("ERROR", f"An unexpected error occurred during service uninstallation: {e}", exit_on_error=True)
 
 def sample_ina219(monitor, data_queue, data_lock):
+    """Samples the INA219 sensor in a separate thread."""
     while True:
         try:
+            current = monitor.getCurrent_mA()
+            power = monitor.getPower_W()
+            bus_voltage = monitor.getBusVoltage_V()
+            percent = monitor.get_percent(bus_voltage)
+
+            current_time = time.time()
+            time_since_last_change = current_time - monitor.last_power_state_change_time
+
+            # The new, robust power state logic
+            if not monitor.is_unplugged:
+                # We are currently in "plugged in" state. Look for a clear sign of unplugging.
+                if bus_voltage < VOLTAGE_THRESHOLD_PLUGGED_IN and current < CURRENT_THRESHOLD_DISCHARGING and time_since_last_change > STATE_CHANGE_DEBOUNCE_SECONDS:
+                    monitor.send_ntfy_notification("unplugged", power, percent, current)
+                    monitor.unplugged_start_time = time.time()
+                    log_message("INFO", "🔌 Power Unplugged - Running on Battery")
+                    monitor.is_unplugged = True
+                    monitor.low_power_notified = False
+                    monitor.low_percent_notified = False
+                    monitor.critical_low_timer_started = False
+                    monitor.last_power_state_change_time = current_time
+            else:
+                # We are currently in "unplugged" state. Look for a clear sign of reconnecting.
+                if (bus_voltage > VOLTAGE_THRESHOLD_PLUGGED_IN and current > CURRENT_THRESHOLD_CHARGING) and time_since_last_change > STATE_CHANGE_DEBOUNCE_SECONDS:
+                    time_on_battery_str = monitor.get_time_on_battery()
+                    log_message("INFO", f"✅ Power Reconnected - Battery ran for {time_on_battery_str}")
+                    monitor.send_ntfy_notification("reconnected", power, percent, current)
+                    monitor.is_unplugged = False
+                    monitor.low_power_notified = False
+                    monitor.low_percent_notified = False
+                    monitor.critical_low_timer_started = False
+                    monitor.unplugged_start_time = None
+                    monitor.last_power_state_change_time = current_time
+                elif (bus_voltage > VOLTAGE_THRESHOLD_PLUGGED_IN and current < CURRENT_THRESHOLD_DISCHARGING) and time_since_last_change > STATE_CHANGE_DEBOUNCE_SECONDS:
+                    # This is the tricky case: power is back on, but battery is still discharging (possibly due to high load).
+                    time_on_battery_str = monitor.get_time_on_battery()
+                    log_message("INFO", f"✅ Power Reconnected - System on external power, battery may be full or under high load. Battery ran for {time_on_battery_str}")
+                    monitor.send_ntfy_notification("reconnected", power, percent, current)
+                    monitor.is_unplugged = False
+                    monitor.low_power_notified = False
+                    monitor.low_percent_notified = False
+                    monitor.critical_low_timer_started = False
+                    monitor.unplugged_start_time = None
+                    monitor.last_power_state_change_time = current_time
+            
+            # Check for low power and low percent
+            if monitor.is_unplugged:
+                if power < monitor.power_threshold and not monitor.low_power_notified:
+                    monitor.send_ntfy_notification("low_power", power, percent, current)
+                    log_message("WARNING", "🪫 Low Power Alert! Check your power source.", exit_on_error=False)
+                    monitor.low_power_notified = True
+                
+                if percent < monitor.percent_threshold and not monitor.low_percent_notified:
+                    monitor.send_ntfy_notification("low_percent", power, percent, current)
+                    log_message("WARNING", f"🪫 Low Battery Alert! Battery at {percent:.1f}%.", exit_on_error=False)
+                    monitor.low_percent_notified = True
+
+                # New Critical Low Battery Logic
+                if percent < monitor.critical_low_threshold:
+                    if not monitor.critical_low_timer_started:
+                        monitor.send_ntfy_notification("critical_low", power, percent, current)
+                        log_message("CRITICAL", f"🔴 CRITICAL LOW BATTERY! Battery at {percent:.1f}%. System will shutdown in {monitor.critical_shutdown_delay}s.", exit_on_error=False)
+                        monitor.critical_low_timer_started = True
+                        monitor.critical_shutdown_timer_start_time = time.time()
+                    
+                    if time.time() - monitor.critical_shutdown_timer_start_time > monitor.critical_shutdown_delay:
+                        log_message("CRITICAL", "🔴 CRITICAL: Shutdown initiated. Goodbye!", exit_on_error=False)
+                        subprocess.run(["sudo", "shutdown", "-h", "now"])
+                        
+            
+            # Put the latest data into the queue for the main loop
+            data = {
+                'bus_voltage': bus_voltage,
+                'current': current,
+                'power': power,
+                'percent': percent
+            }
             with data_lock:
-                bus_voltage = monitor.getBusVoltage_V()
-                shunt_voltage = monitor.getShuntVoltage_mV() / 1000
-                current = monitor.getCurrent_mA()
-                power = monitor.getPower_W()
-                percent = (bus_voltage - 3) / 1.2 * 100
-                if percent > 100:
-                    percent = 100
-                if percent < 0:
-                    percent = 0
-                data = {
-                    'bus_voltage': bus_voltage,
-                    'shunt_voltage': shunt_voltage,
-                    'current': current,
-                    'power': power,
-                    'percent': percent
-                }
-            data_queue.put(data)
-            monitor.power_readings.append(power)
-            monitor.current_readings.append(current)
-            if len(monitor.power_readings) < monitor.power_readings.maxlen:
-                time.sleep(5)
-                continue
-            all_negative = all(c < -10 for c in monitor.current_readings)
-            all_positive = all(c > 10 for c in monitor.current_readings)
-            if all_negative and not monitor.is_unplugged:
-                monitor.send_ntfy_notification("unplugged", power, percent, current)
-            elif all_positive and monitor.is_unplugged:
-                monitor.send_ntfy_notification("reconnected", power, percent, current)
-            elif all_positive and power < monitor.power_threshold and not monitor.low_power_notified:
-                monitor.send_ntfy_notification("low_power", power, percent, current)
-            elif all_positive and percent < monitor.percent_threshold and not monitor.low_percent_notified:
-                monitor.send_ntfy_notification("low_percent", power, percent, current)
-            monitor.process_notification_queue()
+                while not data_queue.empty():
+                    data_queue.get_nowait()
+                data_queue.put(data)
+            
         except Exception as e:
-            log_message("ERROR", f"Sampling error: {e}")
+            log_message("ERROR", f"Error in sampling thread: {e}", exit_on_error=False)
         time.sleep(5)
 
 def main():
+    """
+    Main function to parse arguments and run the monitoring loop.
+    """
     parser = argparse.ArgumentParser(
-        description="Presto UPS HAT Monitor with Service Installation (Version {VERSION})",
-        epilog="""
+        description=f"Presto UPS Monitor Script (Version {VERSION})",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
 Useful journalctl commands for monitoring:
+  - View real-time logs: journalctl -u presto_ups.service -f
+  - View last 50 logs: journalctl -u presto_ups.service -n 50
   - Recent voltage/current logs: journalctl -u presto_ups.service | grep -E "Voltage|Current|Power|Percent" -m 10
   - Power event logs: journalctl -u presto_ups.service | grep -E "unplugged|reconnected|Low power|Low percent" -m 10
   - Critical errors: journalctl -u presto_ups.service -p 0..3 -n 10
-  - Debug logs (if --debug enabled): journalctl -u presto_ups.service | grep DEBUG -m 10
-""",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+  - Check service status: systemctl status presto_ups.service
+"""
     )
-    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s v{VERSION}", help="script version")
-    parser.add_argument("--install_as_service", action="store_true", help="Install as a systemd service")
-    parser.add_argument("--uninstall", action="store_true", help="Uninstall the presto_ups service")
-    parser.add_argument("--test-ntfy", action="store_true", help="Send a test ntfy notification (requires --enable-ntfy)")
-    parser.add_argument("--enable-ntfy", action="store_true", help="Enable ntfy notifications")
-    parser.add_argument("--addr", default="0x43", help="I2C address of INA219 (e.g., 0x43)")
-    parser.add_argument("--ntfy-server", default="https://ntfy.sh", help="ntfy server URL")
-    parser.add_argument("--ntfy-topic", default="pizero_UPSc_TEST", help="ntfy topic for notifications")
-    parser.add_argument("--power-threshold", type=float, default=0.5, help="Power threshold for alerts in watts")
-    parser.add_argument("--percent-threshold", type=float, default=20.0, help="Battery percentage threshold for alerts")
-    parser.add_argument("--battery-capacity", type=int, default=1000, help="Battery capacity in mAh")
-    parser.add_argument("--battery-voltage", type=float, default=3.7, help="Battery nominal voltage in volts")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging for raw I2C data")
+    
+    parser.add_argument("-ntfy", "--enable-ntfy", action="store_true", help="Enable ntfy notifications for power events.")
+    parser.add_argument("-ns", "--ntfy-server", type=str, default="ntfy.sh", help="The ntfy server address.")
+    parser.add_argument("-nt", "--ntfy-topic", type=str, default="pi_ups_monitor", help="The ntfy topic to send notifications to.")
+    parser.add_argument("-i", "--install_as_service", action="store_true", help="Install the script as a systemd service to run on boot.")
+    parser.add_argument("-u", "--uninstall", action="store_true", help="Uninstall the systemd service.")
+    parser.add_argument("-t", "--test-ntfy", action="store_true", help="Send a test ntfy notification and exit.")
+    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {VERSION}")
+
+    # Add new configurable threshold arguments
+    parser.add_argument("--power_threshold", type=float, default=POWER_THRESHOLD, help=f"Low power threshold for ntfy notifications. (default: {POWER_THRESHOLD})")
+    parser.add_argument("--percent_threshold", type=float, default=PERCENT_THRESHOLD, help=f"Low battery percentage threshold for ntfy notifications. (default: {PERCENT_THRESHOLD})")
+    parser.add_argument("--critical_low_threshold", type=float, default=CRITICAL_LOW_THRESHOLD, help=f"Critical battery percentage threshold for shutdown. (default: {CRITICAL_LOW_THRESHOLD})")
+    parser.add_argument("--critical_shutdown_delay", type=int, default=CRITICAL_SHUTDOWN_DELAY, help=f"Delay in seconds before shutdown at critical level. (default: {CRITICAL_SHUTDOWN_DELAY})")
+    parser.add_argument("--battery_capacity_mah", type=int, default=BATTERY_CAPACITY_MAH, help=f"The capacity of the battery in mAh for ETA calculations. (default: {BATTERY_CAPACITY_MAH})")
+    parser.add_argument("--ntfy_cooldown_seconds", type=int, default=NTFY_COOLDOWN_SECONDS, help=f"Cooldown in seconds between repeated low battery notifications. (default: {NTFY_COOLDOWN_SECONDS})")
+
     args = parser.parse_args()
+    
+    script_path = os.path.abspath(__file__)
 
-    global DEBUG_ENABLED
-    DEBUG_ENABLED = args.debug
-
-    if args.install_as_service and (args.uninstall or args.test_ntfy):
-        log_message("ERROR", "Cannot use --install_as_service with --uninstall or --test-ntfy")
-    if args.uninstall and args.test_ntfy:
-        log_message("ERROR", "Cannot use --uninstall with --test-ntfy")
-    if args.test_ntfy and not args.enable_ntfy:
-        log_message("ERROR", "--test-ntfy requires --enable-ntfy")
-
-    if args.power_threshold <= 0:
-        log_message("ERROR", "Power threshold must be positive")
-    if args.percent_threshold <= 0 or args.percent_threshold > 100:
-        log_message("ERROR", "Percent threshold must be between 0 and 100")
-    if args.battery_capacity <= 0:
-        log_message("ERROR", "Battery capacity must be positive")
-    if args.battery_voltage <= 0:
-        log_message("ERROR", "Battery voltage must be positive")
-    if not re.match(r"^0x[0-9A-Fa-f]{2}$", args.addr):
-        log_message("ERROR", "Invalid I2C address format. Use hex (e.g., 0x43)")
-
-    requires_i2c = not (args.install_as_service or args.uninstall or ("-h" in sys.argv or "--help" in sys.argv))
-    if requires_i2c and check_service_running():
-        log_message("ERROR", "The presto_ups service is running. Stop the service first with: sudo systemctl stop presto_ups.service")
-
+    # Handle service management options first
+    if args.install_as_service:
+        install_as_service(script_path, args)
+        sys.exit(0)
+    
     if args.uninstall:
         uninstall_service()
-
+        sys.exit(0)
+        
+    # Handle test ntfy option
     if args.test_ntfy:
-        test_ntfy(args.ntfy_server, args.ntfy_topic)
+        monitor = Monitor(
+            enable_ntfy=True,
+            ntfy_server=args.ntfy_server,
+            ntfy_topic=args.ntfy_topic,
+            power_threshold=args.power_threshold,
+            percent_threshold=args.percent_threshold,
+            critical_low_threshold=args.critical_low_threshold,
+            critical_shutdown_delay=args.critical_shutdown_delay,
+            battery_capacity_mah=args.battery_capacity_mah,
+            ntfy_cooldown_seconds=args.ntfy_cooldown_seconds
+        )
+        monitor.send_ntfy_notification("test_info", 0, 0, 0)
         sys.exit(0)
 
-    if args.install_as_service:
-        check_dependencies(requires_i2c=True)
-        enable_i2c()
-        check_i2c_device(args.addr)
-        install_as_service(args)
+    # If no service options are selected, run the main monitoring loop
+    check_dependencies()
+    
+    log_message("INFO", f"Starting Presto UPS Monitor Script v{VERSION}...")
+    log_message("INFO", f"I2C Address: {hex(I2C_ADDRESS)}")
 
-    check_dependencies(requires_i2c=True)
-
-    monitor = PrestoMonitor(
-        i2c_bus=1,
-        addr=int(args.addr, 16),
+    monitor = Monitor(
         enable_ntfy=args.enable_ntfy,
         ntfy_server=args.ntfy_server,
         ntfy_topic=args.ntfy_topic,
         power_threshold=args.power_threshold,
         percent_threshold=args.percent_threshold,
-        battery_capacity_mAh=args.battery_capacity,
-        battery_voltage=args.battery_voltage
+        critical_low_threshold=args.critical_low_threshold,
+        critical_shutdown_delay=args.critical_shutdown_delay,
+        battery_capacity_mah=args.battery_capacity_mah,
+        ntfy_cooldown_seconds=args.ntfy_cooldown_seconds
     )
+    
+    # Check initial power state and set the flag correctly BEFORE starting the thread
+    initial_voltage = monitor.getBusVoltage_V()
+    if initial_voltage < VOLTAGE_THRESHOLD_PLUGGED_IN:
+        log_message("INFO", "System started on battery power.")
+        monitor.is_unplugged = True
+        monitor.unplugged_start_time = time.time()
+    else:
+        log_message("INFO", "System started on external power.")
+        monitor.is_unplugged = False
 
-    data_queue = queue.Queue()
+    data_queue = Queue()
     data_lock = threading.Lock()
     sampling_thread = threading.Thread(target=sample_ina219, args=(monitor, data_queue, data_lock), daemon=True)
     sampling_thread.start()
@@ -904,22 +752,30 @@ Useful journalctl commands for monitoring:
         try:
             data = data_queue.get_nowait()
             if datetime.now() - last_log_time >= log_interval:
-                log_message("INFO", f"Load Voltage: {data['bus_voltage']:>6.3f} V")
-                log_message("INFO", f"Current:      {data['current']/1000:>6.3f} A")
-                log_message("INFO", f"Power:        {data['power']:>6.3f} W")
-                log_message("INFO", f"Percent:     {data['percent']:>6.1f}%")
+                time_on_battery_str = monitor.get_time_on_battery()
+                time_remaining_str = monitor.get_estimated_time_remaining(data['percent'], data['current'])
+
+                log_message("INFO", "---------------------------------")
+                log_message("INFO", f"V:    {data['bus_voltage']:>6.2f} V, I:  {data['current']/1000:>6.2f} A, W:    {data['power']:>6.2f} W, P:    {data['percent']:>6.1f}%")
+                
+                if time_on_battery_str:
+                    log_message("INFO", f"Time on Battery: {time_on_battery_str}")
+                if time_remaining_str:
+                    log_message("INFO", f"Time Remaining:  {time_remaining_str}")
+
                 log_message("INFO", "System Info:")
                 log_message("INFO", f"Hostname:    {monitor.get_hostname()}")
                 log_message("INFO", f"IP Address:  {monitor.get_ip_address()}")
+                log_message("INFO", f"Uptime:      {monitor.get_uptime()}")
+                log_message("INFO", f"Free RAM:    {monitor.get_ram_info()}")
                 cpu_temp = monitor.get_cpu_temp()
                 gpu_temp = monitor.get_gpu_temp()
-                log_message("INFO", f"CPU Temp:    {cpu_temp if cpu_temp else 'Unknown':>6.1f} °C" if cpu_temp else "CPU Temp:    Unknown")
-                log_message("INFO", f"GPU Temp:    {gpu_temp if gpu_temp else 'Unknown':>6.1f} °C" if gpu_temp else "GPU Temp:    Unknown")
-                log_message("INFO", "---")
+                log_message("INFO", f"CPU Temp:    {cpu_temp:>6.1f} °C" if cpu_temp else "CPU Temp:    Unknown")
+                log_message("INFO", f"GPU Temp:    {gpu_temp:>6.1f} °C" if gpu_temp else "GPU Temp:    Unknown")
+                log_message("INFO", "---------------------------------")
                 last_log_time = datetime.now()
-        except queue.Empty:
-            pass
-        time.sleep(0.1)
+        except Exception as e:
+            time.sleep(1)
 
 if __name__ == "__main__":
     main()
