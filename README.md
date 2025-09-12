@@ -1,108 +1,105 @@
-# <p align="center">Raspberry Pi UPS Monitors [x728 | Hat-c]⚡🔋</p>
+# <p align="center">Raspberry Pi UPS Monitors [X728 | Waveshare UPS HAT (C)] ⚡🔋</p>
 
 <div align="center">
-  
+
 [![GitHub License](https://img.shields.io/github/license/piklz/pi_ups_monitors?style=flat-square&color=blue)](https://github.com/piklz/pi_ups_monitors/blob/main/LICENSE)
 [![Python Version](https://img.shields.io/badge/python-3.7%2B-blue?style=flat-square)](https://www.python.org/)
 [![GitHub Stars](https://img.shields.io/github/stars/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/network/members)
-[![GitHub Issues](https://img.shields.io/github/issues/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/issues) 
+[![GitHub Issues](https://img.shields.io/github/issues/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/issues)
 
-## [support me! ☕](https://buymeacoffee.com/pixelpiklz)
+## [Support me! ☕](https://buymeacoffee.com/pixelpiklz)
 
 </div>
 
-<p align="center "> <img width="520" height="382" alt="piklz_ups_monitors_logo" src="https://github.com/user-attachments/assets/2ea1f180-bb89-4302-8931-576cd7aebd09" /></p>
+<p align="center"> <img width="520" height="382" alt="piklz_ups_monitors_logo" src="https://github.com/user-attachments/assets/2ea1f180-bb89-4302-8931-576cd7aebd09" /></p>
 
-<br> </br>
+<br></br>
 <p align="center"> <img width="300" height="300" src="https://github.com/user-attachments/assets/cfdc4e0d-7ec1-4560-94fe-9bb576172f34"/>
 <img width="300" height="226" src="https://github.com/user-attachments/assets/c67341a6-6d0c-4368-8f3f-67c879ca9918"/></p>
 
 ***
-**_A collection of Python scripts designed for monitoring Uninterruptible Power Supply (UPS) HATs on Raspberry Pi devices_**.<br> </br> 
-The primary focus is on the Geekworm X728 v1.2 and Waveshare PiZero-HAT-C models for now  , which are essential for ensuring the safe operation of your projects. 
 
-> My Raspberry Pi projects tend to be in headless mode in remote locations alot of the time, These scripts monitor critical metrics like battery voltage and power status, enabling automated, graceful shutdowns to prevent data corruption from sudden power loss. The scripts can also send real-time notifications via Ntfy, keeping you informed of any power-related issues. .🚀
-
+**_A collection of Python scripts for monitoring Uninterruptible Power Supply (UPS) HATs on Raspberry Pi devices_**.<br></br>
+The **Presto UPS Monitor** focuses on the **Geekworm X728** (v1.2+) and **Waveshare UPS HAT (C)** for Raspberry Pi Zero, ensuring safe operation for your projects. These scripts monitor critical metrics like battery voltage, current, and power status, enabling automated graceful shutdowns to prevent data corruption and sending real-time notifications via [ntfy.sh](https://ntfy.sh) to keep you informed. 🚀
 
 [Explore the docs »](https://github.com/piklz/pi_ups_monitors/wiki)
 
 [Report Bug](https://github.com/piklz/pi_ups_monitors/issues/new?labels=bug) · [Request Feature](https://github.com/piklz/pi_ups_monitors/issues/new?labels=enhancement)
 
-
 ## Table of Contents
 
 - [About the Project](#about-the-project)
   - [Built With](#built-with)
-  - [Test A ntfy Alert on Phone](#lets-test-a-notification-to-your-phone)
-  - [wiki /help /faq ](https://github.com/piklz/pi_ups_monitors/wiki)
-
+  - [Test a Notification on Your Phone](#lets-test-a-notification-to-your-phone)
+  - [Wiki / Help / FAQ](https://github.com/piklz/pi_ups_monitors/wiki)
 
 ## About the Project
 
-📋 **Pi UPS Monitors/presto_x728_monitor.py** is for UPS HATs like the Geekworm X728. `presto_x728_monitor.py`.<br>-</br>
-📋 **Pi UPS Monitors/presto_hatc_monitor.py** is for Pizero Hat-c by waveshare. `presto_hatc_monitor.py`.
+📋 **presto_x728_monitor.py**: Designed for the **Geekworm X728 UPS HAT**, leveraging its INA219 sensor, S8261/FS8205 BMS, and GPIO controls (e.g., GPIO6 for AC loss detection).  
+📋 **presto_hatc_monitor.py**: Tailored for the **Waveshare UPS HAT (C)** for Raspberry Pi Zero, using INA219, ETA6003 charger, and TPS61088 boost with pogo pin integration.
 
-Key benefits:
-- Prevents abrupt power failures 🛡️
-- Logs battery health for analysis 📊
-- Easy integration with cron jobs or systemd services ⏰
-- ntfy for android /ios instant notifications or low battery or powerdown issues!
-- can run in background as a system service set-and-forget!
-
+### Key Benefits
+- 🛡️ Prevents abrupt power failures with safe shutdowns.
+- 📊 Logs battery health (voltage, current, percentage) for analysis.
+- ⏰ Runs as a systemd service or cron job for set-and-forget operation.
+- 🔔 Sends instant ntfy notifications for power loss, low battery, or shutdown events.
+- 🔗 Supports stacking with X-series storage boards (e.g., X825/X857).
 
 <p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
 
 ### Built With
-
 - ![Python](https://img.shields.io/badge/Python-3776AB?style=flat&logo=python&logoColor=white) - Core scripting language
-- SMBus/I2C - For hardware communication
-- Raspberry Pi OS - Tested on Bookworm  pi5 should be ok on debian os's like dietpi and ubuntu (i am testing when possible )and other pi's zero to 5
+- SMBus/I2C - For INA219 and hardware communication
+- Raspberry Pi OS - Tested on Bookworm; compatible with Pi Zero to 5, Debian-based OSes like DietPi and Ubuntu (testing ongoing)
 
 <p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
 
 ## Getting Started
 
-To set up this monitor on your Raspberry Pi, follow these steps. It's quick and straightforward! ⏱️
+Set up the Presto UPS Monitor on your Raspberry Pi with these steps. Quick and easy! ⏱️
 
 ### Prerequisites
+- Raspberry Pi (Zero, 1, 2, 3, 4, or 5)
+- Geekworm X728 UPS HAT or Waveshare UPS HAT (C)
+- Raspberry Pi OS or Debian-based OS (e.g., DietPi, Ubuntu)
+- Basic terminal knowledge and SSH access
 
-- Raspberry Pi (any model , e.g., Pi 01234 or 5)
-- X728 UPS HAT (or compatible) or waveshare pizero hat-c
-- Raspberry Pi OS installed or debian based os (will test dietpi and others)
-- Basic terminal knowledge + ssh to remote into it
+### Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/piklz/pi_ups_monitors/
+   ```
+2. Navigate to the scripts directory:
+   ```bash
+   cd ~/pi_ups_monitors/scripts
+   ```
+3. Check usage for your UPS HAT:
+   ```bash
+   ./presto_x728_monitor.py --help
+   ```
+   or
+   ```bash
+   ./presto_hatc_monitor.py --help
+   ```
 
-<br> </br>
-- in your user home dir Enter & run:
-<pre><code>git clone https://github.com/piklz/pi_ups_monitors/</code></pre>
-- Enter the directory:
-<pre><code>cd ~/pi_ups_monitors/scripts</code></pre>
+4. Test the script live (without arguments):
+   ```bash
+   ./presto_x728_monitor.py
+   ```
+   or
+   ```bash
+   ./presto_hatc_monitor.py
+   ```
 
-- run the one you want for your hat , to see its usage and tips with options run this cmd:
-<pre><code> ~/pi_ups_monitors/scripts/presto_x728_monitor.py --help</code></pre>
+### Command-Line Options
 
+#### For Geekworm X728 (`presto_x728_monitor.py v1.0.23`)
+```bash
+usage: presto_x728_monitor.py [-h] [--install_as_service] [--uninstall] [--test-ntfy] [--enable-ntfy] [--ntfy-server NTFY_SERVER]
+                              [--ntfy-topic NTFY_TOPIC] [--low-battery-threshold LOW_BATTERY_THRESHOLD]
+                              [--critical-low-threshold CRITICAL_LOW_THRESHOLD] [--debug]
 
-
--Test it live just run code without and args :
-<pre><code>~/pi_ups_monitors/scripts/presto_x728_monitor.py</code></pre>
-- to test your ntfy topicnotiffication tyr this :
-<pre><code>~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy --ntfy-topic x728_TEST</code></pre>
-
-
-<br> </br>
-
-- heres the options you can use for [geekworm] **x728** :
-<pre><code>usage: presto_x728_monitor.py [-h] [--install_as_service] [--uninstall] [--test-ntfy] [--enable-ntfy] [--ntfy-server NTFY_SERVER] [--ntfy-topic NTFY_TOPIC] [--low-battery-threshold LOW_BATTERY_THRESHOLD]
-                              [--critical-low-threshold CRITICAL_LOW_THRESHOLD] [--debug]</code></pre>
-                              
-- heres the options you can use for [waveshare] **hat-c** :
-<pre><code>usage: presto_hatc_monitor.py [-h] [--install_as_service] [--addr ADDR] [--ntfy-server NTFY_SERVER] [--ntfy-topic NTFY_TOPIC] [--power-threshold POWER_THRESHOLD] [--percent-threshold PERCENT_THRESHOLD]
-                              [--battery-capacity BATTERY_CAPACITY] [--battery-voltage BATTERY_VOLTAGE] [--force-reinstall]</code></pre>
-
-<br> </br>
-x728 UPS HAT Monitor with Service Installation 
-
-<pre><code>
 options:
   -h, --help            show this help message and exit
   --install_as_service  Install as a systemd service
@@ -112,7 +109,7 @@ options:
   --ntfy-server NTFY_SERVER
                         ntfy server URL (default: https://ntfy.sh)
   --ntfy-topic NTFY_TOPIC
-                        ntfy topic for notifications (default: x728_UPS)
+                        ntfy topic for notifications (default: presto_hatc_ups)
   --low-battery-threshold LOW_BATTERY_THRESHOLD
                         Low battery threshold percentage (default: 30%)
   --critical-low-threshold CRITICAL_LOW_THRESHOLD
@@ -124,126 +121,139 @@ Useful journalctl commands for monitoring:
   - Power event logs: journalctl -u x728_ups.service | grep -E "Power Loss|Power Restored|Shutdown" -m 10
   - Critical errors: journalctl -u x728_ups.service -p 0..3 -n 10
   - Debug logs (if --debug enabled): journalctl -u x728_ups.service | grep DEBUG -m 10
-  - </code></pre>
-  
-<br> </br>
+```
 
-
-
-waveshare(pizero)UPS HAT-c Monitor with Service Installation
-
-<pre><code>
-
+#### For Waveshare UPS HAT (C) (`presto_hatc_monitor.py v1.5.4`)
+```bash
+usage: presto_hatc_monitor.py [-h] [-i] [-u] [-ntfy] [-nt NTFY_TOPIC] [-ns NTFY_SERVER] [-t] [--power-threshold POWER_THRESHOLD]
+                              [--percent-threshold PERCENT_THRESHOLD] [--critical-low-threshold CRITICAL_LOW_THRESHOLD]
+                              [--critical-shutdown-delay CRITICAL_SHUTDOWN_DELAY] [--battery-capacity-mah BATTERY_CAPACITY_MAH]
+                              [--ntfy-cooldown-seconds NTFY_COOLDOWN_SECONDS]
 
 options:
   -h, --help            show this help message and exit
-  --install_as_service  Install as a systemd service
-  --addr ADDR           I2C address of INA219 (e.g., 0x43)
-  --ntfy-server NTFY_SERVER
-                        ntfy server URL
-  --ntfy-topic NTFY_TOPIC
-                        ntfy topic for notifications
+  -i, --install_as_service
+                        Install the script as a systemd service
+  -u, --uninstall       Uninstall the systemd service and script
+  -ntfy, --enable-ntfy  Enable ntfy notifications
+  -nt NTFY_TOPIC, --ntfy-topic NTFY_TOPIC
+                        ntfy topic name (default: presto_hatc_ups)
+  -ns NTFY_SERVER, --ntfy-server NTFY_SERVER
+                        ntfy server URL (default: https://ntfy.sh)
+  -t, --test-ntfy       Send a test notification and exit
   --power-threshold POWER_THRESHOLD
-                        Power threshold for alerts in watts
+                        Power threshold in Watts to detect power loss
   --percent-threshold PERCENT_THRESHOLD
-                        Battery percentage threshold for alerts
-  --battery-capacity BATTERY_CAPACITY
-                        Battery capacity in mAh
-  --battery-voltage BATTERY_VOLTAGE
-                        Battery nominal voltage in volts
-  --force-reinstall     Force reinstallation of the service without prompting
-</code></pre>
+                        Battery percentage threshold for low battery alert
+  --critical-low-threshold CRITICAL_LOW_THRESHOLD
+                        Battery percentage threshold for critical low alert, triggering shutdown
+  --critical-shutdown-delay CRITICAL_SHUTDOWN_DELAY
+                        Delay in seconds before shutdown on critical battery level
+  --battery-capacity-mah BATTERY_CAPACITY_MAH
+                        Battery capacity in mAh for time remaining estimation
+  --ntfy-cooldown-seconds NTFY_COOLDOWN_SECONDS
+                        Cooldown in seconds between repeated notifications for the same event
 
+Useful journalctl commands for monitoring:
+  - View real-time logs: journalctl -u presto_hatc_monitor.service -f
+  - View last 50 logs: journalctl -u presto_hatc_monitor.service -n 50
+  - Recent voltage/current logs: journalctl -u presto_hatc_monitor.service | grep -E "Voltage|Current|Power|Percent" -m 10
+  - Power event logs: journalctl -u presto_hatc_monitor.service | grep -E "unplugged|reconnected|Low power|Low percent" -m 10
+  - Critical errors: journalctl -u presto_hatc_monitor.service -p 0..3 -n 10
+  - Check service status: systemctl status presto_hatc_monitor.service
+```
 
-### Lets TEST a NOTIFICATION to your Phone:
+### Let's Test a Notification to Your Phone
+![ntfy](https://play-lh.googleusercontent.com/O9uRWkaFLCzl7wkpeUWFuJfllrvykC6wOCR3sy8sZkrCyIMs-DPv7j7D710QY8VSc7KN=w200-h440-rw)
 
-firstly you'll need the app on your phone you can grab it from here :
-**STEP 1:**
+**Step 1: Install ntfy**
+- Download the ntfy app:
+  - **Android**: [Google Play Store](https://play.google.com/store/apps/details?id=io.heckel.ntfy)
+  - **iOS**: [App Store](https://apps.apple.com/us/app/ntfy/id1625396347)
+- Open the app, click "+", and subscribe to a topic (e.g., `presto_hatc_ups` for default testing).
+
+**Step 2: Test Notification**
+- If the script is already running as a service (`systemctl status x728_ups.service` or `presto_hatc_monitor.service`), stop it first:
+  ```bash
+  sudo systemctl stop x728_ups.service
+  ```
+  or
+  ```bash
+  sudo systemctl stop presto_hatc_monitor.service
+  ```
+- Send a test notification:
+  ```bash
+  ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy --ntfy-topic presto_hatc_ups
+  ```
+  or
+  ```bash
+  ~/pi_ups_monitors/scripts/presto_hatc_monitor.py --enable-ntfy --test-ntfy --ntfy-topic presto_hatc_ups
+  ```
+- Try a custom topic:
+  ```bash
+  ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy --ntfy-topic UPS_PI_OFFICE
+  ```
+
+**Step 3: Install as a Service**
+- Install with custom settings (e.g., custom topic or thresholds):
+  ```bash
+  sudo ~/pi_ups_monitors/scripts/presto_x728_monitor.py --install_as_service --enable-ntfy --ntfy-topic presto_hatc_ups --low-battery-threshold 40
+  ```
+  or
+  ```bash
+  sudo ~/pi_ups_monitors/scripts/presto_hatc_monitor.py --install_as_service --enable-ntfy --ntfy-topic presto_hatc_ups --percent-threshold 30
+  ```
+- Confirm settings (defaults apply for unspecified options):
+  ```
+  [INFO] New settings: enable-ntfy=True, ntfy-server=https://ntfy.sh, ntfy-topic=presto_hatc_ups, low-battery-threshold=40%, critical-low-threshold=10%
+  ```
+- The service will reload with your settings. Test by unplugging the power to receive a battery power alert with estimated time remaining.
+
+### Tips
+#### Running in Terminal (If Service is Active)
+- Stop the service to test in terminal:
+  ```bash
+  sudo systemctl stop x728_ups.service
+  ```
+  or
+  ```bash
+  sudo systemctl stop presto_hatc_monitor.service
+  ```
+- Run with desired options, then restart the service:
+  ```bash
+  sudo systemctl start x728_ups.service
+  ```
+  or
+  ```bash
+  sudo systemctl start presto_hatc_monitor.service
+  ```
+
+#### Uninstalling the Service
+- Remove the service completely:
+  ```bash
+  sudo ~/pi_ups_monitors/scripts/presto_x728_monitor.py --uninstall
+  ```
+  or
+  ```bash
+  sudo ~/pi_ups_monitors/scripts/presto_hatc_monitor.py --uninstall
+  ```
+
+#### Checking Logs for Issues
+- **X728 Logs**:
+  - Recent battery/voltage: `journalctl -u x728_ups.service | grep -E "Battery level|Voltage" -m 10`
+  - Power events: `journalctl -u x728_ups.service | grep -E "Power Loss|Power Restored|Shutdown" -m 10`
+  - Critical errors: `journalctl -u x728_ups.service -p 0..3 -n 10`
+  - Debug logs: `journalctl -u x728_ups.service | grep DEBUG -m 10`
+- **Waveshare UPS HAT (C) Logs**:
+  - Real-time logs: `journalctl -u presto_hatc_monitor.service -f`
+  - Last 50 logs: `journalctl -u presto_hatc_monitor.service -n 50`
+  - Voltage/current: `journalctl -u presto_hatc_monitor.service | grep -E "Voltage|Current|Power|Percent" -m 10`
+  - Power events: `journalctl -u presto_hatc_monitor.service | grep -E "unplugged|reconnected|Low power|Low percent" -m 10`
+  - Critical errors: `journalctl -u presto_hatc_monitor.service -p 0..3 -n 10`
+  - Service status: `systemctl status presto_hatc_monitor.service`
+- General: Check `/var/log` or use `dmesg -f` for system logs.
 
 <p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
 
-![ntfy](https://play-lh.googleusercontent.com/O9uRWkaFLCzl7wkpeUWFuJfllrvykC6wOCR3sy8sZkrCyIMs-DPv7j7D710QY8VSc7KN=w240-h480-rw)
-
-ANDROID:
-        https://play.google.com/store/apps/details?id=io.heckel.ntfy
-
-IOS:
-                 https://apps.apple.com/us/app/ntfy/id1625396347
 
 
-**STEP 2:**
-
- 1. once you have installed ntfy  , 
- 2. go in the app click + & set up (or subscribe) a topic name for this test
- 3. lets use : **x728_UPS_TEST**  << this is default topic when run without any args , so change after tests as you need
-
-**TIP*** if you haven't installed as service yet ***skip to*** ***STEP 3***
-
-> if you have already installed it as a service .it wont run.. this is
-> normal.  (The x728_ups service is running checked via ***systemctl
-> status x728_ups.service***) it will be  using GPIO resources - and you
-> wont be able to run script live in the terminal to test it options .
-> We will  Stop the service first with: ***sudo systemctl stop
-> x728_ups.service***  then run this command to send out a test ntfy to
-> your phone
-
-**STEP 3:**
-we use the options :
-1/ enable ntfy mode 
-2/ tell it we want a test message only 
-3/ Topic name {x728_UPS_TEST}
-
-command to use :
-
-    ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy 
-    
- to re-run with your own topic (dont forget to add it to your ntfy app as well)
- 
-    Try:   --ntfy-topic NAME    eg ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy  --ntfy-topic UPS_PI_OFFICE
-
-you should receive a alert pretty quick like this :
-
-now you can make you're own topics and install as a service the script (with your own thresholds) will ask you if you want to overwrite the settings this is how we change topics or thresholds any time in the future  -just add the options to the command and it use them
-
-    sudo ~/pi_ups_monitors/scripts/presto_x728_monitor.py --install_as_service --enable-ntfy  --ntfy-topic x728_YOUR_AWESOME_TOPIC --low-battery-threshold 40 
-
-it will show you confirmations (any command options you dont use will just be the default values) :
-
-     [x728-UPS-service] [INFO] New settings: enable-ntfy=True, ntfy-server=https://ntfy.sh, ntfy-topic=x728_YOUR_AWESOME_TOPIC, low-battery-threshold=40%%, critical-low-threshold=10%%
-
-    
-it will then update it and reload daemon.. with your new settings
-
-    
-    [x728-UPS-service] [INFO] Would you like to reinstall with new settings? (y/n): 
-now you can test your Pi by removing of power usb cable from the x728 (or hat-c in pizero's  case)  and you should see an alert warning you its on battery power now .. and how much time left (approx I may tweak this code further)
-
-## *tips:
-#### in order to run it on terminal to test values (and its already running as a service) you must stop service first?
-
- 1. `sudo systemctl stop x728_ups.service` 
-run you script  as normal in terminal with  your flags options ,then when done testing  
-
- -  *to bring it back up just redo command but with **start*** 
- . `sudo systemctl start x728_ups.service` 
-
-
-#### how do i stop the service or uninstall it completely ?
-
-*you can temporarily stop it with command above or use the --uninstall flag (**sudo** needed i believe)*
-
-    sudo ~/pi_ups_monitors/scripts/presto_x728_monitor.py --uninstall
-
-#### if something went wrong or pi UPS crashed how do i check the logs? 
-  - Recent battery/voltage logs: 
-       -  ***journalctl -u x728_ups.service | grep -E "Battery level|Voltage" -m 10***
-  - Power event logs: 
-     - ***journalctl -u x728_ups.service | grep -E "Power Loss|Power Restored|Shutdown" -m 10***
-  - Critical errors: 
-      - ***journalctl -u x728_ups.service -p 0..3 -n 10***
-  - Debug logs (if --**debug** enabled): 
-    - ***journalctl -u x728_ups.service | grep DEBUG -m 10***
-    - and ofcourse the usual dmesg -f daemon     
-    - and check your  '/var/logs'   cat /var/logs/....etc
-   
-<p align="right">(<a href="#raspberry-pi-ups-monitors-x728--hat-c">back to top</a>)</p>
