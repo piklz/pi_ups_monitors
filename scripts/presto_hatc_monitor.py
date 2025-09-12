@@ -489,6 +489,13 @@ class Monitor:
                 title = "Test"
                 priority = 5
                 tags = "test"
+            elif event_type == "test_info":
+                message = f"✅ Presto UPS Monitor Test Notification from {hostname}\n\n- V:    {self.getBusVoltage_V():.2f} V\n- I:    {self.getCurrent_mA()/1000:.2f} A\n- W:    {self.getPower_W():.2f} W\n- P:    {self.get_percent(self.getBusVoltage_V()):.1f}%\n- Hostname:  {self.get_hostname()}\n- IP Address:  {self.get_ip_address()}\n- Uptime:    {self.get_uptime()}\n- Free RAM:  {self.get_ram_info()}\n- CPU Temp:  {self.get_cpu_temp():.1f} °C"
+                title = "Test Notification - Full Report"
+                priority = 3
+                tags = "test,info"
+            else:
+                return # Do nothing for unhandled events
             
             if message and title:
                 response = requests.post(f"{self.ntfy_server}/{self.ntfy_topic}",
@@ -675,9 +682,15 @@ Useful journalctl commands for monitoring:
         monitor = Monitor(
             enable_ntfy=args.enable_ntfy,
             ntfy_server=args.ntfy_server,
-            ntfy_topic=args.ntfy_topic
+            ntfy_topic=args.ntfy_topic,
+            power_threshold=args.power_threshold,
+            percent_threshold=args.percent_threshold,
+            critical_low_threshold=args.critical_low_threshold,
+            critical_shutdown_delay=args.critical_shutdown_delay,
+            battery_capacity_mah=args.battery_capacity_mah,
+            ntfy_cooldown_seconds=args.ntfy_cooldown_seconds
         )
-        monitor.send_ntfy_notification("test", 0, 0, 0)
+        monitor.send_ntfy_notification("test_info", 0, 0, 0)
         sys.exit(0)
 
     # Fallback to main monitoring loop
