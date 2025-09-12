@@ -8,7 +8,7 @@
 # waveshares \_| |_/\_| |_/\_/ \___| UPS for pizero (https://www.waveshare.com/ups-hat-c.htm)
 # -----------------------------------------------
 # Presto UPS Monitor Script
-# Version: 1.5.3
+# Version: 1.5.4
 # Author: piklz
 # GitHub: https://github.com/piklz/pi_ups_monitor
 # Description:
@@ -22,6 +22,8 @@
 #   to reduce SD card wear.
 #
 # Changelog:
+#   Version 1.5.4 (2025-09-12):
+#   - Added a new "test_info" notification type that provides a detailed status report
 #   Version 1.5.3 (2025-09-12):
 #   - Corrected state change detection in the continuous loop to use current (mA)
 #     instead of power (W), which was causing false positive 'plugged in' readings
@@ -31,14 +33,7 @@
 #     of the power (W) value for a more accurate determination of the power state
 #     on startup. This prevents false "plugged in" reports when the device is
 #     actually running on battery.
-#   Version 1.5.1 (2025-09-12):
-#   - Merged the professional, self-contained installation and uninstallation logic
-#     from the X728 script. The script now installs itself to /usr/local/bin/ and
-#     creates a dynamic systemd service file, removing the need for manual file editing
-#     and sudoers modifications.
-#   - Fixed a bug where the installation script would generate an invalid systemd
-#     service file, causing the service to fail on startup. The script now correctly
-#     forwards only the user-provided arguments to the service's ExecStart command.
+#
 #
 # -----------------------------------------------
 # usage examples:
@@ -84,7 +79,7 @@ except ImportError:
     requests = None
 
 # Constants
-VERSION = "1.5.3"
+VERSION = "1.5.4"
 I2C_ADDRESS = 0x43
 SERVICE_NAME = "presto_hatc_monitor.service"
 SCRIPT_NAME = "presto_hatc_monitor.py"
