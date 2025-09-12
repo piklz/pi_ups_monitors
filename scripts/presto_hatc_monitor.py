@@ -275,7 +275,21 @@ class Monitor:
         elif voltage > 3.45:
             return 10.0
         else:
-            return 5.0
+            # A more granular calculation for the final percentage range
+            # based on the voltage equivalent of 5% and the safe shutdown voltage
+            # For example, mapping 3.45V to 10% and 3.3V to 0%
+            if voltage > 3.42:
+                return 5.0
+            elif voltage > 3.39:
+                return 4.0
+            elif voltage > 3.36:
+                return 3.0
+            elif voltage > 3.33:
+                return 2.0
+            elif voltage > 3.30:
+                return 1.0
+            else:
+                return 0.0
     
     def get_hostname(self):
         """Returns the device hostname."""
