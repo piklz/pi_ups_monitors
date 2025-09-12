@@ -485,7 +485,7 @@ class Monitor:
                 priority = 5
                 tags = "test"
             elif event_type == "test_info":
-                message = f"✅ Presto UPS Monitor Test Notification from {hostname}\n\n- V:    {self.getBusVoltage_V():.2f} V\n- I:    {self.getCurrent_mA()/1000:.2f} A\n- W:    {self.getPower_W():.2f} W\n- P:    {self.get_percent(self.getBusVoltage_V()):.1f}%\n- Hostname:  {self.get_hostname()}\n- IP Address:  {self.get_ip_address()}\n- Uptime:    {self.get_uptime()}\n- Free RAM:  {self.get_ram_info()}\n- CPU Temp:  {self.get_cpu_temp():.1f} °C"
+                message = f"✅ Presto UPS Monitor Test Notification from {hostname}\n\n- V:    {self.getBusVoltage_V():.2f} V\n- I:    {self.getCurrent_mA()/1000:.2f} A\n- W:    {self.getPower_W():.2f} W\n- P:    {self.get_percent(self.getBusVoltage_V()):.1f}%\n- Hostname:  {self.get_hostname()}\n- IP Address:  {self.get_ip_address()}\n- Uptime:    {self.get_uptime()}\n- Free RAM:  {self.get_ram_info()}\n- CPU Temp:  {self.get_cpu_temp():.1f} °C\n◕‿◕"
                 title = "Test Notification - Full Report"
                 priority = 3
                 tags = "test,info"
