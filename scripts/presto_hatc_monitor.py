@@ -459,23 +459,20 @@ class Monitor:
                 title = "Power Reconnected"
                 priority = 3
                 tags = "reconnected"
-            elif event_type == "low_power":
-                message = f"🪫 Low Power Alert on {hostname}! Power draw is low at {power:.2f}W."
-                title = "Low Power"
-                priority = 4
-                tags = "low_power"
             elif event_type == "low_percent":
                 message = f"🪫 Low Battery Alert on {hostname}! Battery is at {percent:.1f}%. {eta_info}"
                 title = "Low Battery"
                 priority = 4
                 tags = "low_battery"
             elif event_type == "critical_low":
-                message = f"🚨 Critical Battery Alert on {hostname}! Battery at {percent:.1f}%. Shutdown initiated. {eta_info}"
+                # Changed to warn that shutdown is pending, not that it has initiated.
+                message = f"🚨 Critical Battery Alert on {hostname}! Battery at {percent:.1f}%. A shutdown will begin in {self.critical_shutdown_delay} seconds."
                 title = "Critical Battery"
                 priority = 5
                 tags = "critical_battery"
             elif event_type == "shutdown":
-                message = f"🔴 Shutdown Initiated on {hostname} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}."
+                # Final notification confirming shutdown is initiated.
+                message = f"🔴 Shutdown Initiated on {hostname} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}.\n◕︵◕"
                 title = "Shutdown Initiated"
                 priority = 5
                 tags = "shutdown"
