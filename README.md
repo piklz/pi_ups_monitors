@@ -35,6 +35,7 @@ The primary focus is on the Geekworm X728 v1.2 and Waveshare PiZero-HAT-C models
 - [About the Project](#about-the-project)
   - [Built With](#built-with)
   - [Test A ntfy Alert on Phone](#lets-test-a-notification-to-your-phone)
+  - [wiki /help /faq ](https://github.com/piklz/pi_ups_monitors/wiki)
 
 
 ## About the Project
