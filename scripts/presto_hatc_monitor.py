@@ -22,18 +22,32 @@
 #   to reduce SD card wear.
 #
 # Changelog:
-#   Version 1.5.4 (2025-09-12):
-#   - Added a new "test_info" notification type that provides a detailed status report
+#   Version 1.5.4 (2025-09-13):
+#   - Implemented hysteresis logic in the main loop to prevent rapid "chattering"
+#     of unplugged/reconnected events due to minor current fluctuations when the
+#     device is idle. Now uses separate thresholds for charging and discharging.
+#   - Corrected the 'critical_low' ntfy notification text to only warn that a
+#     shutdown will begin, not that it has already started.
+#
 #   Version 1.5.3 (2025-09-12):
 #   - Corrected state change detection in the continuous loop to use current (mA)
 #     instead of power (W), which was causing false positive 'plugged in' readings
 #     and preventing unplug/reconnect notifications from being sent.
+#
 #   Version 1.5.2 (2025-09-12):
 #   - Corrected the initial status check to use the current (mA) value instead
 #     of the power (W) value for a more accurate determination of the power state
 #     on startup. This prevents false "plugged in" reports when the device is
 #     actually running on battery.
 #
+#   Version 1.5.1 (2025-09-12):
+#   - Merged the professional, self-contained installation and uninstallation logic
+#     from the X728 script. The script now installs itself to /usr/local/bin/ and
+#     creates a dynamic systemd service file, removing the need for manual file editing
+#     and sudoers modifications.
+#   - Fixed a bug where the installation script would generate an invalid systemd
+#     service file, causing the service to fail on startup. The script now correctly
+#     forwards only the user-provided arguments to the service's ExecStart command.
 #
 # -----------------------------------------------
 # usage examples:
@@ -154,7 +168,7 @@ def check_dependencies():
         log_message("ERROR", "libraspberrypi-bin is not installed. Please install it with 'sudo apt install libraspberrypi-bin'")
 
 # ----------------------------------------------
-#  INSTALLATION AND UNINSTALLATION FUNCTIONS
+# NEW INSTALLATION AND UNINSTALLATION FUNCTIONS
 # ----------------------------------------------
 
 def install_as_service(args):
@@ -459,13 +473,18 @@ class Monitor:
                 title = "Power Reconnected"
                 priority = 3
                 tags = "reconnected"
+            elif event_type == "low_power":
+                message = f"🪫 Low Power Alert on {hostname}! Power draw is low at {power:.2f}W."
+                title = "Low Power"
+                priority = 4
+                tags = "low_power"
             elif event_type == "low_percent":
                 message = f"🪫 Low Battery Alert on {hostname}! Battery is at {percent:.1f}%. {eta_info}"
                 title = "Low Battery"
                 priority = 4
                 tags = "low_battery"
             elif event_type == "critical_low":
-                # Changed to warn that shutdown is pending, not that it has initiated.
+                # Corrected text to warn about impending shutdown, not that it has already started.
                 message = f"🚨 Critical Battery Alert on {hostname}! Battery at {percent:.1f}%. A shutdown will begin in {self.critical_shutdown_delay} seconds."
                 title = "Critical Battery"
                 priority = 5
@@ -476,13 +495,9 @@ class Monitor:
                 title = "Shutdown Initiated"
                 priority = 5
                 tags = "shutdown"
-            elif event_type == "test":
-                message = f"🌟 Test Notification from {hostname}!"
-                title = "Test"
-                priority = 5
-                tags = "test"
             elif event_type == "test_info":
-                message = f"✅ Presto UPS Monitor Test Notification from {hostname}\n\n- V:    {self.getBusVoltage_V():.2f} V\n- I:    {self.getCurrent_mA()/1000:.2f} A\n- W:    {self.getPower_W():.2f} W\n- P:    {self.get_percent(self.getBusVoltage_V()):.1f}%\n- Hostname:  {self.get_hostname()}\n- IP Address:  {self.get_ip_address()}\n- Uptime:    {self.get_uptime()}\n- Free RAM:  {self.get_ram_info()}\n- CPU Temp:  {self.get_cpu_temp():.1f} °C\n◕‿◕"
+                # Added ETA to the test notification
+                message = f"✅ Presto UPS Monitor Test Notification from {hostname}\n\n- V:    {self.getBusVoltage_V():.2f} V\n- I:    {self.getCurrent_mA()/1000:.2f} A\n- W:    {self.getPower_W():.2f} W\n- P:    {self.get_percent(self.getBusVoltage_V()):.1f}%\n- Hostname:  {self.get_hostname()}\n- IP Address:  {self.get_ip_address()}\n- Uptime:    {self.get_uptime()}\n- Free RAM:  {self.get_ram_info()}\n- CPU Temp:  {self.get_cpu_temp():.1f} °C\n- {eta_info}\n◕‿◕"
                 title = "Test Notification - Full Report"
                 priority = 3
                 tags = "test,info"
@@ -567,14 +582,15 @@ def main():
             current_mA = monitor.getCurrent_mA()
             percent = monitor.get_percent(bus_voltage)
 
-            # --- CORRECTED STATE-CHANGE LOGIC ---
+            # --- CORRECTED STATE-CHANGE LOGIC WITH HYSTERESIS ---
             # Use current to reliably check if the device is plugged in or not.
             # A positive current means it's charging, negative means discharging.
-            is_plugged_in = current_mA > 50 # Using 50mA to prevent noise from triggering a false positive.
+            is_charging = current_mA > CURRENT_THRESHOLD_CHARGING
+            is_discharging = current_mA < CURRENT_THRESHOLD_DISCHARGING
             current_time = time.time()
-
+            
             # Debounce logic for state changes
-            if is_plugged_in and monitor.is_unplugged and (current_time - monitor.last_power_state_change_time) > STATE_CHANGE_DEBOUNCE_SECONDS:
+            if is_charging and monitor.is_unplugged and (current_time - monitor.last_power_state_change_time) > STATE_CHANGE_DEBOUNCE_SECONDS:
                 log_message("INFO", "Power reconnected!")
                 monitor.send_ntfy_notification("reconnected", power_status, percent, current_mA)
                 monitor.is_unplugged = False
@@ -583,7 +599,7 @@ def main():
                 monitor.low_power_notified = False
                 monitor.low_percent_notified = False
                 monitor.critical_low_timer_started = False
-            elif not is_plugged_in and not monitor.is_unplugged and (current_time - monitor.last_power_state_change_time) > STATE_CHANGE_DEBOUNCE_SECONDS:
+            elif is_discharging and not monitor.is_unplugged and (current_time - monitor.last_power_state_change_time) > STATE_CHANGE_DEBOUNCE_SECONDS:
                 log_message("WARNING", "Power unplugged!")
                 monitor.send_ntfy_notification("unplugged", power_status, percent, current_mA)
                 monitor.is_unplugged = True
@@ -682,7 +698,13 @@ Useful journalctl commands for monitoring:
             battery_capacity_mah=args.battery_capacity_mah,
             ntfy_cooldown_seconds=args.ntfy_cooldown_seconds
         )
-        monitor.send_ntfy_notification("test_info", 0, 0, 0)
+        
+        # Manually set the state and get a live current reading for the test
+        monitor.is_unplugged = True
+        live_current_mA = monitor.getCurrent_mA()
+        
+        # Pass the live current reading to the notification function
+        monitor.send_ntfy_notification("test_info", 0, 0, live_current_mA)
         sys.exit(0)
 
     # Fallback to main monitoring loop
