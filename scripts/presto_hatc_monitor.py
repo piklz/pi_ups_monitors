@@ -8,7 +8,7 @@
 # waveshares \_| |_/\_| |_/\_/ \___| UPS for pizero (https://www.waveshare.com/ups-hat-c.htm)
 # -----------------------------------------------
 # Presto UPS Monitor Script
-# Version: 1.5.4
+# Version: 1.5.5
 # Author: piklz
 # GitHub: https://github.com/piklz/pi_ups_monitor
 # Description:
@@ -22,6 +22,8 @@
 #   to reduce SD card wear.
 #
 # Changelog:
+#   Version 1.5.5 (2025-09-14):
+#   - Added verion of script to logmessage on first start for clarity.
 #   Version 1.5.4 (2025-09-13):
 #   - Implemented hysteresis logic in the main loop to prevent rapid "chattering"
 #     of unplugged/reconnected events due to minor current fluctuations when the
@@ -93,7 +95,7 @@ except ImportError:
     requests = None
 
 # Constants
-VERSION = "1.5.4"
+VERSION = "1.5.5"
 I2C_ADDRESS = 0x43
 SERVICE_NAME = "presto_hatc_monitor.service"
 SCRIPT_NAME = "presto_hatc_monitor.py"
@@ -292,13 +294,13 @@ class Monitor:
         self.set_calibration_16V_5A()
 
     def read(self, address):
-        """Helper function to read from I2C bus (from original script)."""
+        """Helper function to read from I2C bus ."""
         data = bus.read_i2c_block_data(I2C_ADDRESS, address, 2)
         value = (data[0] * 256) + data[1]
         return value
 
     def write(self, address, data):
-        """Helper function to write to I2C bus (from original script)."""
+        """Helper function to write to I2C bus ."""
         temp = [0, 0]
         temp[1] = data & 0xFF
         temp[0] = (data & 0xFF00) >> 8
@@ -314,20 +316,20 @@ class Monitor:
         self.write(_REG_CONFIG, config_value)
 
     def getBusVoltage_V(self):
-        """Returns the bus voltage in Volts (from original script)."""
+        """Returns the bus voltage in Volts ."""
         self.write(_REG_CALIBRATION, self._cal_value)
         self.read(_REG_BUSVOLTAGE)
         return (self.read(_REG_BUSVOLTAGE) >> 3) * 0.004
 
     def getCurrent_mA(self):
-        """Returns the current in milliamps (from original script)."""
+        """Returns the current in milliamps ."""
         value = self.read(_REG_CURRENT)
         if value > 32767:
             value -= 65535
         return value * self._current_lsb
 
     def getPower_W(self):
-        """Returns the power in Watts (from original script)."""
+        """Returns the power in Watts ."""
         self.write(_REG_CALIBRATION, self._cal_value)
         value = self.read(_REG_POWER)
         if value > 32767:
@@ -564,9 +566,9 @@ def main():
     initial_current_mA = monitor.getCurrent_mA()
 
     if initial_current_mA > 0:
-        log_message("INFO", "Script started: Device is currently plugged in and charging.")
+        log_message("INFO", f"Script started (v{VERSION}): Device is currently plugged in and charging.")
     else:
-        log_message("WARNING", "Script started: Device is currently running on battery.")
+        log_message("WARNING", f"Script started (v{VERSION}): Device is currently running on battery.")
         # Manually set the state variables since we missed the 'unplugged' event
         monitor.is_unplugged = True
         monitor.unplugged_start_time = time.time()
