@@ -444,11 +444,11 @@ class X728Monitor:
                     self.low_battery_notified = False
                     self.shutdown_timer_active = False
                 elif event_type == "low_battery" and self.is_unplugged:
-                    message = f"🪫 Low Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V,Est Time Remaining: {est_time_remaining}, Threshold: {self.low_battery_threshold}%), Temps: {temp_info}"
+                    message = f"🪫 Low Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V,Est Time Remaining: {est_time_remaining} Threshold: {self.low_battery_threshold}%), Temps: {temp_info}"
                     title = "x728 UPS Low Battery"
                     tags.append("low_battery")
-                elif event_type == "critical_battery":
-                    message = f"🚨 Critical Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V,Est Time Remaining: {est_time_remaining}, Critical Threshold: {self.critical_low_threshold}%), Temps: {temp_info}"
+                elif event_type == "critical_battery":                    
+                    message = f"🚨 Critical Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Critical Threshold: {self.critical_low_threshold}%), Temps: {temp_info}.\n\n60 secs is commencing. Please reconnect to stop shutdown."
                     title = "x728 UPS Critical Battery"
                     tags.append("critical_battery")
                 elif event_type == "shutdown_initiated":
@@ -614,28 +614,45 @@ def test_ntfy(ntfy_server, ntfy_topic):
         monitor.close()
 
 def sample_x728(monitor):
-    last_health_check = time.time()
+    """Main sampling loop to monitor the X728 HAT status."""
     while True:
         try:
-            with i2c_lock:
-                battery_level = monitor.read_battery_level()
-                voltage = monitor.read_voltage()
-            if sys.stdin.isatty():
-                time_remaining = get_time_remaining(battery_level)
-                log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V, Est. Time Remaining: {time_remaining}")
-            power_state = monitor.line.get_value()
-            if battery_level < monitor.critical_low_threshold and power_state == 1 and not monitor.shutdown_timer_active:
-                monitor.start_shutdown_timer(battery_level, voltage)
-            elif battery_level < monitor.low_battery_threshold and power_state == 1 and not monitor.low_battery_notified:
-                monitor.handle_low_battery(battery_level, voltage)
-            monitor.process_notification_queue()
-            if time.time() - last_health_check >= 30:
-                log_message("INFO", "Sampling thread health check: Running normally")
-                last_health_check = time.time()
+            battery_level = monitor.read_battery_level()
+            voltage = monitor.read_voltage()
+            
+            log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V")
+
+            if monitor.is_unplugged and not monitor.shutdown_timer_active:
+                if battery_level <= monitor.critical_low_threshold:
+                    log_message("WARNING", f"Critical low battery threshold ({monitor.critical_low_threshold}%) reached. Starting shutdown timer...")
+                    monitor.start_shutdown_timer()
+                    monitor.send_ntfy_notification("critical_battery", battery_level, voltage)
+                elif battery_level <= monitor.low_battery_threshold and not monitor.low_battery_notified:
+                    log_message("WARNING", f"Low battery threshold ({monitor.low_battery_threshold}%) reached. Sending alert.")
+                    monitor.send_ntfy_notification("low_battery", battery_level, voltage)
+            
+            # Check for power state changes
+            is_ac_power = monitor.is_ac_power_connected()
+            if is_ac_power and monitor.is_unplugged:
+                log_message("INFO", "AC power restored. Resetting shutdown timer.")
+                monitor.cancel_shutdown_timer()
+                monitor.send_ntfy_notification("power_restored", battery_level, voltage)
+            elif not is_ac_power and not monitor.is_unplugged:
+                log_message("WARNING", "AC power lost!")
+                monitor.send_ntfy_notification("power_loss", battery_level, voltage)
+
+            # Check for queued notifications to be sent after cooldown
+            if monitor.notification_queue:
+                current_time = datetime.now()
+                if monitor.last_notification is None or (current_time - monitor.last_notification) >= monitor.notification_cooldown:
+                    _time, _event, _bat, _volt = monitor.notification_queue.pop(0)
+                    monitor.send_ntfy_notification(_event, _bat, _volt)
+            
+            time.sleep(monitor.sleep_interval)
+
         except Exception as e:
-            log_message("ERROR", f"Sampling error: {e}. Retrying in 0.5s...", exit_on_error=False)
-            time.sleep(0.5)
-        time.sleep(2)
+            log_message("ERROR", f"Sampling error: {e}. Retrying in {monitor.sleep_interval}s...", exit_on_error=False)
+            time.sleep(monitor.sleep_interval)
 
 def pld_event(monitor, event):
     try:
