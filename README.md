@@ -193,6 +193,10 @@ Useful journalctl commands for monitoring:
   ```bash
   ~/pi_ups_monitors/scripts/presto_x728_monitor.py --enable-ntfy --test-ntfy --ntfy-topic UPS_PI_OFFICE
   ```
+  - via ntfy website (and mobile ) you'll get nice notifications like this :
+<div align="center">  
+<img width="500" height="700" alt="image" src="https://github.com/user-attachments/assets/9908b0b6-07a5-40f1-a934-d03f2e9422c8" />
+</div>
 
 **Step 3: Install as a Service**
 - Install with custom settings (e.g., custom topic or thresholds):
