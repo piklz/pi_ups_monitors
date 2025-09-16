@@ -66,7 +66,7 @@ RECONNECT_TIMEOUT = 60
 RED = '\033[91m'
 GREEN = '\033[92m'
 ENDC = '\033[0m'
-SCRIPT_VERSION = "1.0.24"
+SCRIPT_VERSION = "1.1.0"
 # Define the chip and lines
 chipname = "gpiochip0"
 line_offset = 6
