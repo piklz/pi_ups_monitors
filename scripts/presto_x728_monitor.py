@@ -678,7 +678,7 @@ def install_as_service(args):
                 log_message("WARNING", "x728_ups service is currently running")
             else:
                 log_message("INFO", "x728_ups service is installed but not running")
-            result = subprocess.run(["systemctl", "status", "x728_ups.service"], capture_output=True, text=True)
+            result = subprocess.run(["systemctl", "status", "presto_x728_ups.service"], capture_output=True, text=True)
             service_status = result.stdout
         except subprocess.CalledProcessError as e:
             log_message("WARNING", f"Failed to check service status: {e.stderr}", exit_on_error=False)
@@ -702,15 +702,15 @@ def install_as_service(args):
         log_message("INFO", "Ensuring x728_ups service is stopped and reset")
         try:
             if service_running:
-                subprocess.run(["systemctl", "stop", "x728_ups.service"], check=True)
+                subprocess.run(["systemctl", "stop", "presto_x728_ups.service"], check=True)
                 log_message("INFO", "Service stopped successfully")
-            subprocess.run(["systemctl", "disable", "x728_ups.service"], check=True)
+            subprocess.run(["systemctl", "disable", "presto_x728_ups.service"], check=True)
             log_message("INFO", "Service disabled successfully")
             # Check if service is loaded before resetting failed state
             result = subprocess.run(["systemctl", "is-active", "--quiet", "x728_ups"], check=False)
             if result.returncode == 0 or os.path.exists(service_file):
                 try:
-                    subprocess.run(["systemctl", "reset-failed", "x728_ups.service"], check=True)
+                    subprocess.run(["systemctl", "reset-failed", "presto_x728_ups.service"], check=True)
                     log_message("INFO", "Service failed state reset successfully")
                 except subprocess.CalledProcessError as e:
                     log_message("WARNING", f"Failed to reset failed state: {e.stderr}", exit_on_error=False)
@@ -780,9 +780,9 @@ WantedBy=multi-user.target
     try:
         subprocess.run(["systemctl", "daemon-reload"], check=True)
         log_message("INFO", "Systemd daemon reloaded successfully")
-        subprocess.run(["systemctl", "enable", "x728_ups.service"], check=True)
+        subprocess.run(["systemctl", "enable", "presto_x728_ups.service"], check=True)
         log_message("INFO", "Service enabled successfully")
-        subprocess.run(["systemctl", "start", "x728_ups.service"], check=True)
+        subprocess.run(["systemctl", "start", "presto_x728_ups.service"], check=True)
         log_message("INFO", "Service started successfully")
     except subprocess.CalledProcessError as e:
         log_message("ERROR", f"Failed to manage service: {e.stderr}")
@@ -792,17 +792,17 @@ WantedBy=multi-user.target
         result = subprocess.run(["systemctl", "is-active", "x728_ups"], capture_output=True, text=True, check=True)
         active_status = result.stdout.strip()
         log_message("INFO", f"Service active status: {active_status}")
-        result = subprocess.run(["systemctl", "status", "x728_ups.service"], capture_output=True, text=True)
+        result = subprocess.run(["systemctl", "status", "presto_x728_ups.service"], capture_output=True, text=True)
         log_message("INFO", f"Service detailed status:\n{result.stdout}")
     except subprocess.CalledProcessError as e:
         log_message("ERROR", f"Failed to retrieve service status: {e.stderr}", exit_on_error=False)
 
     # Display management tips
     log_message("INFO", "Service Management Tips:")
-    log_message("INFO", "  - Check recent battery/voltage logs: journalctl -u x728_ups.service | grep -E \"Battery level|Voltage\" -m 10")
-    log_message("INFO", "  - Check power events: journalctl -u x728_ups.service | grep -E \"Power Loss|Power Restored|Shutdown\" -m 10")
-    log_message("INFO", "  - Check critical errors: journalctl -u x728_ups.service -p 0..3 -n 10")
-    log_message("INFO", "  - Check debug logs (if enabled): journalctl -u x728_ups.service | grep DEBUG -m 10")
+    log_message("INFO", "  - Check recent battery/voltage logs: journalctl -u presto_x728_ups.service | grep -E \"Battery level|Voltage\" -m 10")
+    log_message("INFO", "  - Check power events: journalctl -u presto_x728_ups.service | grep -E \"Power Loss|Power Restored|Shutdown\" -m 10")
+    log_message("INFO", "  - Check critical errors: journalctl -u presto_x728_ups.service -p 0..3 -n 10")
+    log_message("INFO", "  - Check debug logs (if enabled): journalctl -u presto_x728_ups.service | grep DEBUG -m 10")
     log_message("INFO", "  - Uninstall service: sudo {} --uninstall".format(os.path.basename(__file__)))
     reinstall_cmd = f"sudo {os.path.basename(__file__)} --install_as_service --low-battery-threshold {args.low_battery_threshold} --critical-low-threshold {args.critical_low_threshold}"
     if args.enable_ntfy:
@@ -834,7 +834,7 @@ def uninstall_service():
                 log_message("WARNING", "x728_ups service is currently running")
             else:
                 log_message("INFO", "x728_ups service is installed but not running")
-            result = subprocess.run(["systemctl", "status", "x728_ups.service"], capture_output=True, text=True)
+            result = subprocess.run(["systemctl", "status", "presto_x728_ups.service"], capture_output=True, text=True)
             service_status = result.stdout
         except subprocess.CalledProcessError as e:
             log_message("WARNING", f"Failed to check service status: {e.stderr}", exit_on_error=False)
@@ -858,12 +858,12 @@ def uninstall_service():
     if service_running:
         log_message("INFO", "Stopping x728_ups service")
         try:
-            subprocess.run(["systemctl", "stop", "x728_ups.service"], check=True)
+            subprocess.run(["systemctl", "stop", "presto_x728_ups.service"], check=True)
             log_message("INFO", "Service stopped successfully")
         except subprocess.CalledProcessError as e:
             log_message("ERROR", f"Failed to stop service: {e.stderr}", exit_on_error=False)
         try:
-            subprocess.run(["systemctl", "disable", "x728_ups.service"], check=True)
+            subprocess.run(["systemctl", "disable", "presto_x728_ups.service"], check=True)
             log_message("INFO", "Service disabled successfully")
         except subprocess.CalledProcessError as e:
             log_message("ERROR", f"Failed to disable service: {e.stderr}", exit_on_error=False)
@@ -899,10 +899,10 @@ def main():
         description="x728 UPS HAT Monitor with Service Installation (Version 1.0.23)",
         epilog="""
 Useful journalctl commands for monitoring:
-  - Recent battery/voltage logs: journalctl -u x728_ups.service | grep -E "Battery level|Voltage" -m 10
-  - Power event logs: journalctl -u x728_ups.service | grep -E "Power Loss|Power Restored|Shutdown" -m 10
-  - Critical errors: journalctl -u x728_ups.service -p 0..3 -n 10
-  - Debug logs (if --debug enabled): journalctl -u x728_ups.service | grep DEBUG -m 10
+  - Recent battery/voltage logs: journalctl -u presto_x728_ups.service | grep -E "Battery level|Voltage" -m 10
+  - Power event logs: journalctl -u presto_x728_ups.service | grep -E "Power Loss|Power Restored|Shutdown" -m 10
+  - Critical errors: journalctl -u presto_x728_ups.service -p 0..3 -n 10
+  - Debug logs (if --debug enabled): journalctl -u presto_x728_ups.service | grep DEBUG -m 10
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -937,7 +937,7 @@ Useful journalctl commands for monitoring:
     # Check for running service if GPIO access is needed
     requires_gpio = not (args.install_as_service or args.uninstall or ("-h" in sys.argv or "--help" in sys.argv))
     if requires_gpio and check_service_running():
-        log_message("ERROR", "The x728_ups service is running, which is using GPIO resources. Stop the service first with: sudo systemctl stop x728_ups.service")
+        log_message("ERROR", "The x728_ups service is running, which is using GPIO resources. Stop the service first with: sudo systemctl stop presto_x728_ups.service")
 
     if args.uninstall:
         uninstall_service()
