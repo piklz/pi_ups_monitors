@@ -13,7 +13,7 @@
 #  all Raspberry Pis(Pi, 0, 1, 2, 3, 4, 5). Previously, the gpiochip on the Raspberry Pi 5 was 4.
 # -----------------------------------------------
 # x728 UPS Monitor Script
-# Version: 1.1.0
+# Version: 1.2.0
 # Author: piklz
 # GitHub: https://github.com/piklz/pi_ups_monitor
 # Geekworm Site: https://wiki.geekworm.com/X728-hardware#Power_Jack_and_Connectors
@@ -25,6 +25,11 @@
 #   Installable as a systemd service. Logs to systemd-journald with rotation managed by journald.
 #
 # Changelog:
+#   Version 1.2.0 (2025-09-16):
+#     - **CRITICAL FIX**: Replaced the blocking shutdown timer and infinite shutdown loop with a non-blocking, event-driven model.
+#     - Now responds instantly to AC power restoration during the shutdown countdown.
+#     - Removed the infinite loop in shutdown_sequence to allow a proper system shutdown.
+#     - Streamlined power monitoring logic to be handled primarily by the GPIO event thread.
 #   Version 1.1.0 (2025-09-14):
 #     - Added est. time remaining(battery) to notifications + short args for command-line options for easier use.
 #   Version 1.0.23 (2025-08-21):
@@ -66,7 +71,7 @@ RECONNECT_TIMEOUT = 60
 RED = '\033[91m'
 GREEN = '\033[92m'
 ENDC = '\033[0m'
-SCRIPT_VERSION = "1.1.0"
+SCRIPT_VERSION = "1.2.0"
 # Define the chip and lines
 chipname = "gpiochip0"
 line_offset = 6
@@ -79,14 +84,7 @@ i2c_lock = threading.Lock()
 DEBUG_ENABLED = False
 
 def log_message(log_level, console_message, log_file_message=None, exit_on_error=True):
-    """_summary_
-
-    Args:
-        log_level (_type_): _description_
-        console_message (_type_): _description_
-        log_file_message (_type_, optional): _description_. Defaults to None.
-        exit_on_error (bool, optional): _description_. Defaults to True.
-    """    
+    """Logs messages to the console and systemd-journald."""    
     if log_level == "DEBUG" and not DEBUG_ENABLED:
         return
     if log_file_message is None:
@@ -111,11 +109,7 @@ def log_message(log_level, console_message, log_file_message=None, exit_on_error
         sys.exit(1)
 
 def check_service_running():
-    """_summary_
-
-    Returns:
-        _type_: _description_
-    """    
+    """Checks if the systemd service is already running."""    
     try:
         result = subprocess.run(["systemctl", "is-active", "--quiet", "x728_ups"], check=False)
         if result.returncode == 0:
@@ -131,14 +125,7 @@ def check_service_running():
         return False
 
 def check_dependencies(requires_i2c=True):
-    """_summary_
-
-    Args:
-        requires_i2c (bool, optional): _description_. Defaults to True.
-
-    Returns:
-        _type_: _description_
-    """    
+    """Checks for necessary dependencies like python3-smbus and python3-gpiod."""    
     log_message("INFO", f"Checking dependencies for user {USER}")
     smbus, bus, has_requests = None, None, False
 
@@ -185,7 +172,7 @@ def check_dependencies(requires_i2c=True):
     return smbus, bus, has_requests
 
 def enable_i2c():
-    
+    """Checks if I2C is enabled in config.txt and the i2c-dev module is loaded."""
     config_file = "/boot/firmware/config.txt"
     log_message("INFO", f"Checking I2C status in {config_file}")
     try:
@@ -235,19 +222,10 @@ def get_time_remaining(battery_level):
     
     return f"{hours}h {minutes}m {seconds}s"
 
-
 class X728Monitor:
     
-    def __init__(self, enable_ntfy=False, ntfy_server="https://ntfy.sh", ntfy_topic="x728_UPS_TEST", low_battery_threshold=30, critical_low_threshold=10):
-        """_summary_
-
-        Args:
-            enable_ntfy (bool, optional): _description_. Defaults to False.
-            ntfy_server (str, optional): _description_. Defaults to "https://ntfy.sh".
-            ntfy_topic (str, optional): _description_. Defaults to "x728_UPS_TEST".
-            low_battery_threshold (int, optional): _description_. Defaults to 30.
-            critical_low_threshold (int, optional): _description_. Defaults to 10.
-        """        
+    def __init__(self, enable_ntfy=False, ntfy_server="https://ntfy.sh", ntfy_topic="x728_UPS", low_battery_threshold=30, critical_low_threshold=10):
+        """Initializes the monitor, GPIO, and power state."""        
         self.enable_ntfy = enable_ntfy
         self.ntfy_server = ntfy_server
         self.ntfy_topic = ntfy_topic
@@ -257,7 +235,7 @@ class X728Monitor:
         self.last_notification = None
         self.notification_cooldown = timedelta(minutes=5)
         self.low_battery_notified = False
-        self.shutdown_timer_active = False
+        self.shutdown_at_time = None # Use a timestamp for non-blocking timer
         self.notification_queue = []
 
         # GPIO setup
@@ -278,6 +256,7 @@ class X728Monitor:
         self.check_initial_power_state()
 
     def check_initial_power_state(self):
+        """Checks the power state at startup and logs/notifies as needed."""
         try:
             power_state = self.line.get_value()
             if power_state == 1:
@@ -298,7 +277,7 @@ class X728Monitor:
             log_message("ERROR", f"Failed to check initial power state: {e}", exit_on_error=False)
 
     def read_battery_level(self):
-        
+        """Reads the battery percentage from the I2C chip."""
         if bus is None:
             log_message("ERROR", "I2C bus is not available. Cannot read battery level", exit_on_error=False)
             return 0
@@ -319,6 +298,7 @@ class X728Monitor:
         return 0
 
     def read_voltage(self):
+        """Reads the battery voltage from the I2C chip."""
         if bus is None:
             log_message("ERROR", "I2C bus is not available. Cannot read voltage", exit_on_error=False)
             return 0
@@ -340,6 +320,7 @@ class X728Monitor:
 
     @staticmethod
     def get_cpu_temp():
+        """Returns the CPU temperature."""
         try:
             with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
                 temp = float(f.read()) / 1000.0
@@ -349,6 +330,7 @@ class X728Monitor:
 
     @staticmethod
     def get_gpu_temp():
+        """Returns the GPU temperature."""
         try:
             result = subprocess.run(['vcgencmd', 'measure_temp'], capture_output=True, text=True)
             temp_str = result.stdout.strip().split('=')[1].split("'")[0]
@@ -358,6 +340,7 @@ class X728Monitor:
 
     @staticmethod
     def get_hostname():
+        """Returns the system hostname."""
         try:
             return socket.gethostname()
         except Exception:
@@ -365,6 +348,7 @@ class X728Monitor:
 
     @staticmethod
     def get_ip_address():
+        """Returns the system IP address."""
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
@@ -376,6 +360,7 @@ class X728Monitor:
 
     @staticmethod
     def get_pi_model():
+        """Returns the Raspberry Pi model."""
         try:
             with open('/sys/firmware/devicetree/base/model', 'r') as f:
                 return f.read().strip()
@@ -384,6 +369,7 @@ class X728Monitor:
 
     @staticmethod
     def get_free_ram():
+        """Returns the amount of free RAM in MB."""
         try:
             result = subprocess.run(['free', '-m'], capture_output=True, text=True)
             lines = result.stdout.split('\n')
@@ -395,6 +381,7 @@ class X728Monitor:
 
     @staticmethod
     def get_uptime():
+        """Returns the system uptime."""
         try:
             with open('/proc/uptime', 'r') as f:
                 uptime_seconds = float(f.read().split()[0])
@@ -406,13 +393,7 @@ class X728Monitor:
             return "Unknown"
 
     def send_ntfy_notification(self, event_type, battery_level, voltage):
-        """_summary_
-
-        Args:
-            event_type (_type_): _description_
-            battery_level (_type_): _description_
-            voltage (_type_): _description_
-        """
+        """Sends a notification via ntfy."""
         if not self.enable_ntfy or not HAS_REQUESTS:
             log_message("INFO", f"ntfy notification ({event_type}) skipped: {'ntfy disabled' if not self.enable_ntfy else 'python3-requests not installed'}", exit_on_error=False)
             return
@@ -424,7 +405,7 @@ class X728Monitor:
                 ip = self.get_ip_address()
                 cpu_temp = self.get_cpu_temp()
                 gpu_temp = self.get_gpu_temp()
-                est_time_remaining = self.calculate_estimated_run_time(battery_level)
+                est_time_remaining = get_time_remaining(battery_level)
                 temp_info = (
                     f"CPU: {cpu_temp:.1f}°C, GPU: {gpu_temp:.1f}°C"
                     if cpu_temp is not None and gpu_temp is not None
@@ -442,9 +423,9 @@ class X728Monitor:
                     title = "x728 UPS Power Restored"
                     self.is_unplugged = False
                     self.low_battery_notified = False
-                    self.shutdown_timer_active = False
+                    self.shutdown_at_time = None
                 elif event_type == "low_battery" and self.is_unplugged:
-                    message = f"🪫 Low Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V,Est Time Remaining: {est_time_remaining} Threshold: {self.low_battery_threshold}%), Temps: {temp_info}"
+                    message = f"🪫 Low Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Est. Time Remaining: {est_time_remaining}, Threshold: {self.low_battery_threshold}%), Temps: {temp_info}"
                     title = "x728 UPS Low Battery"
                     tags.append("low_battery")
                 elif event_type == "critical_battery":                    
@@ -487,6 +468,7 @@ class X728Monitor:
                 log_message("INFO", f"Notification ({event_type}) skipped due to cooldown. Will send after {self.notification_cooldown.total_seconds() - (current_time - self.last_notification).total_seconds():.1f} seconds")
 
     def process_notification_queue(self):
+        """Processes and sends queued notifications."""
         if not self.enable_ntfy or not HAS_REQUESTS or not self.notification_queue or self.last_notification is None:
             return
         current_time = datetime.now()
@@ -534,66 +516,33 @@ class X728Monitor:
                     log_message("WARNING", f"Failed to send queued notification: Unexpected error - {e}", exit_on_error=False)
             self.notification_queue = []
             log_message("INFO", "Notification queue cleared")
-
+    
     def handle_low_battery(self, battery_level, voltage):
+        """Handles the low battery event."""
         if not self.low_battery_notified:
             time_remaining = get_time_remaining(battery_level)
             log_message("WARNING", f"{RED}Battery level is low ({battery_level:.1f}%). Est. Time Remaining: {time_remaining}. Monitoring for critical threshold...{ENDC}")
             if self.enable_ntfy:
                 self.send_ntfy_notification("low_battery", battery_level, voltage)
-
-    def start_shutdown_timer(self, battery_level, voltage):
-        self.shutdown_timer_active = True
-        time_remaining = get_time_remaining(battery_level)
-        log_message("WARNING", f"{RED}Battery level is critically low ({battery_level:.1f}%). Est. Time Remaining: {time_remaining}. Waiting {RECONNECT_TIMEOUT} seconds for power restoration...{ENDC}")
-        if self.enable_ntfy:
-            self.send_ntfy_notification("critical_battery", battery_level, voltage)
-        start_time = time.time()
-        while time.time() - start_time < RECONNECT_TIMEOUT:
-            time_remaining = RECONNECT_TIMEOUT - (time.time() - start_time)
-            power_state = self.line.get_value()
-            if power_state == 0:
-                with i2c_lock:
-                    battery_level = self.read_battery_level()
-                    voltage = self.read_voltage()
-                log_message("INFO", f"{GREEN}---AC Power Restored---{ENDC}")
-                log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V")
-                log_message("INFO", "Shutdown timer cancelled due to AC power restoration")
-                if self.enable_ntfy:
-                    self.send_ntfy_notification("power_restored", battery_level, voltage)
-                self.shutdown_timer_active = False
-                return
-            with i2c_lock:
-                current_battery_level = self.read_battery_level()
-                current_voltage = self.read_voltage()
-            time_remaining = get_time_remaining(current_battery_level)
-            log_message("INFO", f"Shutdown timer: {time_remaining:.1f}s remaining, Battery: {current_battery_level:.1f}%, Voltage: {current_voltage:.3f}V, Est. Time Remaining: {time_remaining}")
-            time.sleep(1)
-        if self.line.get_value() == 1:
-            with i2c_lock:
-                current_battery_level = self.read_battery_level()
-                current_voltage = self.read_voltage()
-            self.shutdown_sequence(current_battery_level, current_voltage)
-        self.shutdown_timer_active = False
-
+    
     def shutdown_sequence(self, battery_level, voltage):
+        """
+        Initiates the system shutdown process.
+        This function no longer blocks, it triggers the shutdown and exits.
+        """
         log_message("WARNING", f"{RED}SHUTDOWN SEQUENCE COMMENCING...{ENDC}")
         if self.enable_ntfy:
             self.send_ntfy_notification("shutdown_initiated", battery_level, voltage)
         try:
             self.out_line.set_value(1)
             log_message("INFO", "Shutdown signal sent via GPIO 13. System shutting down...")
-            while True:
-                with i2c_lock:
-                    current_battery_level = self.read_battery_level()
-                    current_voltage = self.read_voltage()
-                time_remaining = get_time_remaining(current_battery_level)
-                log_message("INFO", f"System shutting down, Battery: {current_battery_level:.1f}%, Voltage: {current_voltage:.3f}V, Est. Time Remaining: {time_remaining}")
-                time.sleep(2)
+            subprocess.run(["sudo", "shutdown", "-h", "now"], check=True)
+            sys.exit(0)
         except Exception as e:
             log_message("ERROR", f"Shutdown sequence failed: {e}", exit_on_error=False)
 
     def close(self):
+        """Releases GPIO resources."""
         try:
             if hasattr(self, 'line') and self.line:
                 self.line.release()
@@ -605,56 +554,11 @@ class X728Monitor:
         except Exception as e:
             log_message("ERROR", f"Failed to close resources: {e}", exit_on_error=False)
 
-def test_ntfy(ntfy_server, ntfy_topic):
-    log_message("INFO", "Testing ntfy connectivity")
-    monitor = X728Monitor(enable_ntfy=True, ntfy_server=ntfy_server, ntfy_topic=ntfy_topic)
-    try:
-        monitor.send_ntfy_notification("test", 0, 0)
-    finally:
-        monitor.close()
-
-def sample_x728(monitor):
-    """Main sampling loop to monitor the X728 HAT status."""
-    while True:
-        try:
-            battery_level = monitor.read_battery_level()
-            voltage = monitor.read_voltage()
-            
-            log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V")
-
-            if monitor.is_unplugged and not monitor.shutdown_timer_active:
-                if battery_level <= monitor.critical_low_threshold:
-                    log_message("WARNING", f"Critical low battery threshold ({monitor.critical_low_threshold}%) reached. Starting shutdown timer...")
-                    monitor.start_shutdown_timer()
-                    monitor.send_ntfy_notification("critical_battery", battery_level, voltage)
-                elif battery_level <= monitor.low_battery_threshold and not monitor.low_battery_notified:
-                    log_message("WARNING", f"Low battery threshold ({monitor.low_battery_threshold}%) reached. Sending alert.")
-                    monitor.send_ntfy_notification("low_battery", battery_level, voltage)
-            
-            # Check for power state changes
-            is_ac_power = monitor.is_ac_power_connected()
-            if is_ac_power and monitor.is_unplugged:
-                log_message("INFO", "AC power restored. Resetting shutdown timer.")
-                monitor.cancel_shutdown_timer()
-                monitor.send_ntfy_notification("power_restored", battery_level, voltage)
-            elif not is_ac_power and not monitor.is_unplugged:
-                log_message("WARNING", "AC power lost!")
-                monitor.send_ntfy_notification("power_loss", battery_level, voltage)
-
-            # Check for queued notifications to be sent after cooldown
-            if monitor.notification_queue:
-                current_time = datetime.now()
-                if monitor.last_notification is None or (current_time - monitor.last_notification) >= monitor.notification_cooldown:
-                    _time, _event, _bat, _volt = monitor.notification_queue.pop(0)
-                    monitor.send_ntfy_notification(_event, _bat, _volt)
-            
-            time.sleep(monitor.sleep_interval)
-
-        except Exception as e:
-            log_message("ERROR", f"Sampling error: {e}. Retrying in {monitor.sleep_interval}s...", exit_on_error=False)
-            time.sleep(monitor.sleep_interval)
-
 def pld_event(monitor, event):
+    """
+    Handles GPIO power loss/restoration events.
+    This function now sets a non-blocking timer for shutdown.
+    """
     try:
         for attempt in range(3):
             try:
@@ -669,6 +573,7 @@ def pld_event(monitor, event):
                 else:
                     battery_level, voltage = 0, 0
                     break
+
         if event.type == gpiod.LineEvent.RISING_EDGE:
             monitor.is_unplugged = True
             time_remaining = get_time_remaining(battery_level)
@@ -678,19 +583,23 @@ def pld_event(monitor, event):
                 monitor.send_ntfy_notification("power_loss", battery_level, voltage)
             if battery_level < monitor.low_battery_threshold:
                 monitor.handle_low_battery(battery_level, voltage)
-            if battery_level < monitor.critical_low_threshold and not monitor.shutdown_timer_active:
-                monitor.start_shutdown_timer(battery_level, voltage)
+            if battery_level < monitor.critical_low_threshold:
+                monitor.shutdown_at_time = time.time() + RECONNECT_TIMEOUT
+                log_message("WARNING", f"{RED}Battery level is critically low ({monitor.critical_low_threshold}%) starting shutdown countdown...{ENDC}")
+                if monitor.enable_ntfy:
+                    monitor.send_ntfy_notification("critical_battery", battery_level, voltage)
             monitor.out_line.set_value(0)
         elif event.type == gpiod.LineEvent.FALLING_EDGE:
             monitor.is_unplugged = False
             monitor.low_battery_notified = False
-            monitor.shutdown_timer_active = False
+            monitor.shutdown_at_time = None # Cancel shutdown timer
             log_message("INFO", f"{GREEN}---AC Power Restored---{ENDC}")
             log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V")
             log_message("INFO", "Shutdown timer cancelled due to AC power restoration")
             if monitor.enable_ntfy:
                 monitor.send_ntfy_notification("power_restored", battery_level, voltage)
             monitor.out_line.set_value(0)
+
         if sys.stdin.isatty():
             time_remaining = get_time_remaining(battery_level)
             log_message("INFO", f"Current state: {'Battery' if monitor.is_unplugged else 'AC Power'}, Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V, Est. Time Remaining: {time_remaining}")
@@ -698,19 +607,49 @@ def pld_event(monitor, event):
         log_message("ERROR", f"GPIO event handling failed: {e}", exit_on_error=False)
 
 def gpio_event_thread(monitor):
+    """
+    Thread to listen for GPIO events and handle the shutdown countdown.
+    """
     while True:
         try:
-            event = monitor.line.event_wait()
+            # Check for a pending shutdown
+            if monitor.shutdown_at_time and time.time() >= monitor.shutdown_at_time:
+                with i2c_lock:
+                    battery_level = monitor.read_battery_level()
+                    voltage = monitor.read_voltage()
+                monitor.shutdown_sequence(battery_level, voltage)
+            
+            # Read GPIO events
+            event = monitor.line.event_wait(1) # Wait for 1 second
             if event:
                 event = monitor.line.event_read()
                 pld_event(monitor, event)
-            time.sleep(0.01)
+            
+            # Periodically read battery level and report/notify if on battery
+            if monitor.is_unplugged:
+                with i2c_lock:
+                    battery_level = monitor.read_battery_level()
+                    voltage = monitor.read_voltage()
+                log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V")
+                if battery_level <= monitor.low_battery_threshold and not monitor.low_battery_notified:
+                    monitor.handle_low_battery(battery_level, voltage)
+
+            time.sleep(1) # Main loop sleep
+            
         except KeyboardInterrupt:
             log_message("INFO", "Exiting GPIO event thread...")
             break
         except Exception as e:
             log_message("ERROR", f"GPIO event thread error: {e}. Restarting thread...", exit_on_error=False)
             time.sleep(0.5)
+
+def test_ntfy(ntfy_server, ntfy_topic):
+    log_message("INFO", "Testing ntfy connectivity")
+    monitor = X728Monitor(enable_ntfy=True, ntfy_server=ntfy_server, ntfy_topic=ntfy_topic)
+    try:
+        monitor.send_ntfy_notification("test", 0, 0)
+    finally:
+        monitor.close()
 
 def install_as_service(args):
     if os.geteuid() != 0:
@@ -869,7 +808,6 @@ WantedBy=multi-user.target
     sys.exit(0)
 
 def uninstall_service():
-    
     if os.geteuid() != 0:
         log_message("ERROR", "Service uninstallation must be run as root")
     log_message("INFO", f"Uninstalling x728 UPS monitor service for user {USER}")
@@ -1021,15 +959,13 @@ Useful journalctl commands for monitoring:
         low_battery_threshold=args.low_battery_threshold,
         critical_low_threshold=args.critical_low_threshold
     )
-
-    sampling_thread = threading.Thread(target=sample_x728, args=(monitor,), daemon=True)
-    sampling_thread.start()
-
+    
     gpio_thread = threading.Thread(target=gpio_event_thread, args=(monitor,), daemon=True)
     gpio_thread.start()
 
     try:
         while True:
+            # Main thread keeps running to prevent script from exiting
             time.sleep(1)
     except KeyboardInterrupt:
         log_message("INFO", "Exiting...")
