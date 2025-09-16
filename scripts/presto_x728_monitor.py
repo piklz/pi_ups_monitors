@@ -13,7 +13,7 @@
 #  all Raspberry Pis(Pi, 0, 1, 2, 3, 4, 5). Previously, the gpiochip on the Raspberry Pi 5 was 4.
 # -----------------------------------------------
 # x728 UPS Monitor Script
-# Version: 1.0.23
+# Version: 1.1.0
 # Author: piklz
 # GitHub: https://github.com/piklz/pi_ups_monitor
 # Geekworm Site: https://wiki.geekworm.com/X728-hardware#Power_Jack_and_Connectors
@@ -25,6 +25,8 @@
 #   Installable as a systemd service. Logs to systemd-journald with rotation managed by journald.
 #
 # Changelog:
+#   Version 1.1.0 (2025-09-14):
+#     - Added est. time remaining(battery) to notifications + short args for command-line options for easier use.
 #   Version 1.0.23 (2025-08-21):
 #     - Fixed install_as_service reinstall tip to display actual argument values instead of placeholders.
 #   Version 1.0.22 (2025-08-21):
@@ -34,8 +36,6 @@
 #     - Fixed ValueError in --help by escaping % in argparse help text for threshold arguments.
 #   Version 1.0.20 (2025-08-21):
 #     - Enhanced --install_as_service to stop, disable, and reset service state before reinstalling.
-#     - Added process cleanup to prevent GPIO conflicts during installation.
-#     - Added service status display at end of installation to confirm active state.
 # -----------------------------------------------
 
 import argparse
@@ -66,7 +66,7 @@ RECONNECT_TIMEOUT = 60
 RED = '\033[91m'
 GREEN = '\033[92m'
 ENDC = '\033[0m'
-
+SCRIPT_VERSION = "1.0.24"
 # Define the chip and lines
 chipname = "gpiochip0"
 line_offset = 6
@@ -216,6 +216,26 @@ except ImportError:
         log_message("ERROR", "python3-gpiod is required but not installed. Please install it")
         sys.exit(1)
 
+def get_time_remaining(battery_level):
+    """
+    Estimates the remaining battery life in hours, minutes, and seconds.
+    Note: This is a linear estimate based on a full-charge run time of 7 hours,
+    which assumes an average current draw of ~1000mA for a 7000mAh battery pack.
+    A more accurate calculation would require real-time current draw data from
+    the I2C chip, which is not read by this script.
+    """
+    # Total run time at 100% capacity in seconds (7 hours based on 7000mAh total capacity)
+    TOTAL_RUN_TIME_SECONDS = 7 * 60 * 60
+    
+    remaining_seconds = (battery_level / 100.0) * TOTAL_RUN_TIME_SECONDS
+    
+    hours = int(remaining_seconds // 3600)
+    minutes = int((remaining_seconds % 3600) // 60)
+    seconds = int(remaining_seconds % 60)
+    
+    return f"{hours}h {minutes}m {seconds}s"
+
+
 class X728Monitor:
     
     def __init__(self, enable_ntfy=False, ntfy_server="https://ntfy.sh", ntfy_topic="x728_UPS_TEST", low_battery_threshold=30, critical_low_threshold=10):
@@ -265,7 +285,8 @@ class X728Monitor:
                 with i2c_lock:
                     battery_level = self.read_battery_level()
                     voltage = self.read_voltage()
-                log_message("WARNING", f"{RED}System started on battery power. Battery level: {battery_level:.1f}%{ENDC}")
+                time_remaining = get_time_remaining(battery_level)
+                log_message("WARNING", f"{RED}System started on battery power. Battery level: {battery_level:.1f}% ({time_remaining}){ENDC}")
                 if self.enable_ntfy:
                     self.send_ntfy_notification("power_loss", battery_level, voltage)
                 if battery_level < self.low_battery_threshold:
@@ -411,7 +432,8 @@ class X728Monitor:
                 message = None
                 title = None
                 if event_type == "power_loss":
-                    message = f"⚠️🔌 AC Power Loss on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Temps: {temp_info}"
+                    time_remaining = get_time_remaining(battery_level)
+                    message = f"⚠️🔌 AC Power Loss on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Est. Time Remaining: {time_remaining}, Temps: {temp_info}"
                     title = "x728 UPS Power Loss"
                     self.is_unplugged = True
                 elif event_type == "power_restored":
@@ -421,10 +443,12 @@ class X728Monitor:
                     self.low_battery_notified = False
                     self.shutdown_timer_active = False
                 elif event_type == "low_battery" and self.is_unplugged:
-                    message = f"🪫 Low Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Threshold: {self.low_battery_threshold}%), Temps: {temp_info}"
+                    time_remaining = get_time_remaining(battery_level)
+                    message = f"🪫 Low Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Threshold: {self.low_battery_threshold}%), Est. Time Remaining: {time_remaining}, Temps: {temp_info}"
                     title = "x728 UPS Low Battery"
                 elif event_type == "critical_battery":
-                    message = f"🚨 Critical Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Critical Threshold: {self.critical_low_threshold}%), Temps: {temp_info}"
+                    time_remaining = get_time_remaining(battery_level)
+                    message = f"🚨 Critical Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Critical Threshold: {self.critical_low_threshold}%), Est. Time Remaining: {time_remaining}, Temps: {temp_info}"
                     title = "x728 UPS Critical Battery"
                 elif event_type == "shutdown_initiated":
                     message = f"🔴 Shutdown Initiated on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V), Temps: {temp_info}. Shutting down via GPIO."
@@ -479,7 +503,8 @@ class X728Monitor:
                     message = None
                     title = None
                     if event_type == "power_loss":
-                        message = f"⚠️🔌 AC Power Loss on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Temps: {temp_info}"
+                        time_remaining = get_time_remaining(battery_level)
+                        message = f"⚠️🔌 AC Power Loss on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Est. Time Remaining: {time_remaining}, Temps: {temp_info}"
                         title = "x728 UPS Power Loss"
                     elif event_type == "power_restored":
                         message = f"✅🔋 AC Power Restored on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Temps: {temp_info}"
@@ -506,13 +531,15 @@ class X728Monitor:
 
     def handle_low_battery(self, battery_level, voltage):
         if not self.low_battery_notified:
-            log_message("WARNING", f"{RED}Battery level is low ({battery_level:.1f}%). Monitoring for critical threshold...{ENDC}")
+            time_remaining = get_time_remaining(battery_level)
+            log_message("WARNING", f"{RED}Battery level is low ({battery_level:.1f}%). Est. Time Remaining: {time_remaining}. Monitoring for critical threshold...{ENDC}")
             if self.enable_ntfy:
                 self.send_ntfy_notification("low_battery", battery_level, voltage)
 
     def start_shutdown_timer(self, battery_level, voltage):
         self.shutdown_timer_active = True
-        log_message("WARNING", f"{RED}Battery level is critically low ({battery_level:.1f}%). Waiting {RECONNECT_TIMEOUT} seconds for power restoration...{ENDC}")
+        time_remaining = get_time_remaining(battery_level)
+        log_message("WARNING", f"{RED}Battery level is critically low ({battery_level:.1f}%). Est. Time Remaining: {time_remaining}. Waiting {RECONNECT_TIMEOUT} seconds for power restoration...{ENDC}")
         if self.enable_ntfy:
             self.send_ntfy_notification("critical_battery", battery_level, voltage)
         start_time = time.time()
@@ -533,7 +560,8 @@ class X728Monitor:
             with i2c_lock:
                 current_battery_level = self.read_battery_level()
                 current_voltage = self.read_voltage()
-            log_message("INFO", f"Shutdown timer: {time_remaining:.1f}s remaining, Battery: {current_battery_level:.1f}%, Voltage: {current_voltage:.3f}V")
+            time_remaining = get_time_remaining(current_battery_level)
+            log_message("INFO", f"Shutdown timer: {time_remaining:.1f}s remaining, Battery: {current_battery_level:.1f}%, Voltage: {current_voltage:.3f}V, Est. Time Remaining: {time_remaining}")
             time.sleep(1)
         if self.line.get_value() == 1:
             with i2c_lock:
@@ -553,7 +581,8 @@ class X728Monitor:
                 with i2c_lock:
                     current_battery_level = self.read_battery_level()
                     current_voltage = self.read_voltage()
-                log_message("INFO", f"System shutting down, Battery: {current_battery_level:.1f}%, Voltage: {current_voltage:.3f}V")
+                time_remaining = get_time_remaining(current_battery_level)
+                log_message("INFO", f"System shutting down, Battery: {current_battery_level:.1f}%, Voltage: {current_voltage:.3f}V, Est. Time Remaining: {time_remaining}")
                 time.sleep(2)
         except Exception as e:
             log_message("ERROR", f"Shutdown sequence failed: {e}", exit_on_error=False)
@@ -586,7 +615,8 @@ def sample_x728(monitor):
                 battery_level = monitor.read_battery_level()
                 voltage = monitor.read_voltage()
             if sys.stdin.isatty():
-                log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V")
+                time_remaining = get_time_remaining(battery_level)
+                log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V, Est. Time Remaining: {time_remaining}")
             power_state = monitor.line.get_value()
             if battery_level < monitor.critical_low_threshold and power_state == 1 and not monitor.shutdown_timer_active:
                 monitor.start_shutdown_timer(battery_level, voltage)
@@ -618,8 +648,9 @@ def pld_event(monitor, event):
                     break
         if event.type == gpiod.LineEvent.RISING_EDGE:
             monitor.is_unplugged = True
+            time_remaining = get_time_remaining(battery_level)
             log_message("WARNING", f"{RED}---AC Power Loss OR Power Adapter Failure---{ENDC}")
-            log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V")
+            log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V, Est. Time Remaining: {time_remaining}")
             if monitor.enable_ntfy:
                 monitor.send_ntfy_notification("power_loss", battery_level, voltage)
             if battery_level < monitor.low_battery_threshold:
@@ -638,7 +669,8 @@ def pld_event(monitor, event):
                 monitor.send_ntfy_notification("power_restored", battery_level, voltage)
             monitor.out_line.set_value(0)
         if sys.stdin.isatty():
-            log_message("INFO", f"Current state: {'Battery' if monitor.is_unplugged else 'AC Power'}, Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V")
+            time_remaining = get_time_remaining(battery_level)
+            log_message("INFO", f"Current state: {'Battery' if monitor.is_unplugged else 'AC Power'}, Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V, Est. Time Remaining: {time_remaining}")
     except Exception as e:
         log_message("ERROR", f"GPIO event handling failed: {e}", exit_on_error=False)
 
@@ -711,7 +743,7 @@ def install_as_service(args):
             if result.returncode == 0 or os.path.exists(service_file):
                 try:
                     subprocess.run(["systemctl", "reset-failed", "presto_x728_ups.service"], check=True)
-                    log_message("INFO", "Service failed state reset successfully")
+                    log_message("WARNING", "Service failed state reset successfully")
                 except subprocess.CalledProcessError as e:
                     log_message("WARNING", f"Failed to reset failed state: {e.stderr}", exit_on_error=False)
             else:
@@ -753,7 +785,7 @@ def install_as_service(args):
     if args.debug:
         exec_start += " --debug"
     service_file_content = f"""[Unit]
-Description=x728 UPS Monitor Service
+Description=Presto x728 UPS Monitor Service
 After=network.target
 
 [Service]
@@ -896,8 +928,8 @@ def uninstall_service():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="x728 UPS HAT Monitor with Service Installation (Version 1.0.23)",
-        epilog="""
+        description=f"x728 UPS HAT Monitor with Service Installation (Version {SCRIPT_VERSION})",
+        epilog=f"""
 Useful journalctl commands for monitoring:
   - Recent battery/voltage logs: journalctl -u presto_x728_ups.service | grep -E "Battery level|Voltage" -m 10
   - Power event logs: journalctl -u presto_x728_ups.service | grep -E "Power Loss|Power Restored|Shutdown" -m 10
@@ -906,17 +938,17 @@ Useful journalctl commands for monitoring:
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--install_as_service", action="store_true", help="Install as a systemd service")
-    parser.add_argument("--uninstall", action="store_true", help="Uninstall the x728_ups service")
-    parser.add_argument("--test-ntfy", action="store_true", help="Send a test ntfy notification (requires --enable-ntfy)")
-    parser.add_argument("--enable-ntfy", action="store_true", help="Enable ntfy notifications")
-    parser.add_argument("--ntfy-server", default="https://ntfy.sh", help="ntfy server URL (default: https://ntfy.sh)")
-    parser.add_argument("--ntfy-topic", default="x728_UPS", help="ntfy topic for notifications (default: x728_UPS)")
-    parser.add_argument("--low-battery-threshold", type=float, default=LOW_BATTERY_THRESHOLD, help=f"Low battery threshold percentage (default: {LOW_BATTERY_THRESHOLD}%%)")
-    parser.add_argument("--critical-low-threshold", type=float, default=CRITICAL_LOW_THRESHOLD, help=f"Critical low battery threshold percentage (default: {CRITICAL_LOW_THRESHOLD}%%)")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging for raw I2C data")
+    parser.add_argument('-i', '--install_as_service', action="store_true", help="Install as a systemd service")
+    parser.add_argument('-u', '--uninstall', action="store_true", help="Uninstall the x728_ups service")
+    parser.add_argument('-t', '--test-ntfy', action="store_true", help="Send a test ntfy notification (requires --enable-ntfy)")
+    parser.add_argument('-ntfy', '--enable-ntfy', action="store_true", help="Enable ntfy notifications (default: False)")
+    parser.add_argument('-ns', '--ntfy-server', default="https://ntfy.sh", help="ntfy server URL (default: https://ntfy.sh)")
+    parser.add_argument('-nt', '--ntfy-topic', default="x728_UPS", help="ntfy topic for notifications (default: x728_UPS)")
+    parser.add_argument('--low-battery-threshold', type=float, default=LOW_BATTERY_THRESHOLD, help=f"Low battery threshold percentage (default: {LOW_BATTERY_THRESHOLD}%%)")
+    parser.add_argument('--critical-low-threshold', type=float, default=CRITICAL_LOW_THRESHOLD, help=f"Critical low battery threshold percentage (default: {CRITICAL_LOW_THRESHOLD}%%)")
+    parser.add_argument('-d','--debug', action="store_true", help="Enable debug logging for raw I2C data (default: False)")
     args = parser.parse_args()
-
+    
     # Set global debug flag
     global DEBUG_ENABLED
     DEBUG_ENABLED = args.debug
