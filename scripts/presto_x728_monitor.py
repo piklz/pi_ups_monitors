@@ -412,7 +412,7 @@ class X728Monitor:
             event_type (_type_): _description_
             battery_level (_type_): _description_
             voltage (_type_): _description_
-        """        
+        """
         if not self.enable_ntfy or not HAS_REQUESTS:
             log_message("INFO", f"ntfy notification ({event_type}) skipped: {'ntfy disabled' if not self.enable_ntfy else 'python3-requests not installed'}", exit_on_error=False)
             return
@@ -431,9 +431,9 @@ class X728Monitor:
                 )
                 message = None
                 title = None
+                tags = []
                 if event_type == "power_loss":
-                    time_remaining = get_time_remaining(battery_level)
-                    message = f"⚠️🔌 AC Power Loss on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Est. Time Remaining: {time_remaining}, Temps: {temp_info}"
+                    message = f"⚠️🔌 AC Power Loss on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Temps: {temp_info}"
                     title = "x728 UPS Power Loss"
                     self.is_unplugged = True
                 elif event_type == "power_restored":
@@ -443,24 +443,29 @@ class X728Monitor:
                     self.low_battery_notified = False
                     self.shutdown_timer_active = False
                 elif event_type == "low_battery" and self.is_unplugged:
-                    time_remaining = get_time_remaining(battery_level)
-                    message = f"🪫 Low Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Threshold: {self.low_battery_threshold}%), Est. Time Remaining: {time_remaining}, Temps: {temp_info}"
+                    message = f"🪫 Low Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Threshold: {self.low_battery_threshold}%), Temps: {temp_info}"
                     title = "x728 UPS Low Battery"
+                    tags.append("low_battery")
                 elif event_type == "critical_battery":
-                    time_remaining = get_time_remaining(battery_level)
-                    message = f"🚨 Critical Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Critical Threshold: {self.critical_low_threshold}%), Est. Time Remaining: {time_remaining}, Temps: {temp_info}"
+                    message = f"🚨 Critical Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Critical Threshold: {self.critical_low_threshold}%), Temps: {temp_info}"
                     title = "x728 UPS Critical Battery"
+                    tags.append("critical_battery")
                 elif event_type == "shutdown_initiated":
                     message = f"🔴 Shutdown Initiated on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V), Temps: {temp_info}. Shutting down via GPIO."
                     title = "x728 UPS Shutdown Initiated"
+                    tags.append("shutdown_initiated")
+                    tags.append("critical_battery")
                 elif event_type == "test":
                     message = f"🌟 x728 UPS Test Notification\nHostname: {hostname}\nIP: {ip}\nModel: {self.get_pi_model()}\nFree RAM: {self.get_free_ram()} MB\nUptime: {self.get_uptime()}\n◕‿◕"
                     title = "x728 UPS Test Alert"
                 if message and title:
+                    headers = {"Title": title.encode('utf-8')}
+                    if tags:
+                        headers["Tags"] = ",".join(tags)
                     response = requests.post(
                         f"{self.ntfy_server}/{self.ntfy_topic}",
                         data=message.encode('utf-8'),
-                        headers={"Title": title.encode('utf-8')}
+                        headers=headers
                     )
                     if response.status_code == 200:
                         log_message("INFO", f"Notification sent successfully: {message}")
