@@ -424,6 +424,7 @@ class X728Monitor:
                 ip = self.get_ip_address()
                 cpu_temp = self.get_cpu_temp()
                 gpu_temp = self.get_gpu_temp()
+                est_time_remaining = self.calculate_estimated_run_time(battery_level)
                 temp_info = (
                     f"CPU: {cpu_temp:.1f}°C, GPU: {gpu_temp:.1f}°C"
                     if cpu_temp is not None and gpu_temp is not None
@@ -433,7 +434,7 @@ class X728Monitor:
                 title = None
                 tags = []
                 if event_type == "power_loss":
-                    message = f"⚠️🔌 AC Power Loss on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Temps: {temp_info}"
+                    message = f"⚠️🔌 AC Power Loss on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Est Time Remaining: {est_time_remaining}, Temps: {temp_info}"
                     title = "x728 UPS Power Loss"
                     self.is_unplugged = True
                 elif event_type == "power_restored":
@@ -443,11 +444,11 @@ class X728Monitor:
                     self.low_battery_notified = False
                     self.shutdown_timer_active = False
                 elif event_type == "low_battery" and self.is_unplugged:
-                    message = f"🪫 Low Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Threshold: {self.low_battery_threshold}%), Temps: {temp_info}"
+                    message = f"🪫 Low Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V,Est Time Remaining: {est_time_remaining}, Threshold: {self.low_battery_threshold}%), Temps: {temp_info}"
                     title = "x728 UPS Low Battery"
                     tags.append("low_battery")
                 elif event_type == "critical_battery":
-                    message = f"🚨 Critical Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V, Critical Threshold: {self.critical_low_threshold}%), Temps: {temp_info}"
+                    message = f"🚨 Critical Battery Alert on {hostname} (IP: {ip}): {battery_level:.1f}% ({voltage:.3f}V,Est Time Remaining: {est_time_remaining}, Critical Threshold: {self.critical_low_threshold}%), Temps: {temp_info}"
                     title = "x728 UPS Critical Battery"
                     tags.append("critical_battery")
                 elif event_type == "shutdown_initiated":
