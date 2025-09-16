@@ -13,7 +13,7 @@
 #  all Raspberry Pis(Pi, 0, 1, 2, 3, 4, 5). Previously, the gpiochip on the Raspberry Pi 5 was 4.
 # -----------------------------------------------
 # x728 UPS Monitor Script
-# Version: 1.2.0
+# Version: 1.3.0
 # Author: piklz
 # GitHub: https://github.com/piklz/pi_ups_monitor
 # Geekworm Site: https://wiki.geekworm.com/X728-hardware#Power_Jack_and_Connectors
@@ -25,6 +25,12 @@
 #   Installable as a systemd service. Logs to systemd-journald with rotation managed by journald.
 #
 # Changelog:
+#   Version 1.3.0 (2025-09-16):
+#     - **CRITICAL FIX**: Replaced the blocking shutdown timer and infinite shutdown loop with a non-blocking, event-driven model.
+#     - Now responds instantly to AC power restoration during the shutdown countdown.
+#     - Removed the infinite loop in shutdown_sequence to allow a proper system shutdown.
+#     - **NEW**: Added an initial state check on startup to handle cases where the script starts after power has already been lost.
+#     - Streamlined power monitoring logic to be handled primarily by the GPIO event thread.
 #   Version 1.2.0 (2025-09-16):
 #     - **CRITICAL FIX**: Replaced the blocking shutdown timer and infinite shutdown loop with a non-blocking, event-driven model.
 #     - Now responds instantly to AC power restoration during the shutdown countdown.
@@ -71,7 +77,7 @@ RECONNECT_TIMEOUT = 60
 RED = '\033[91m'
 GREEN = '\033[92m'
 ENDC = '\033[0m'
-SCRIPT_VERSION = "1.2.0"
+SCRIPT_VERSION = "1.3.0"
 # Define the chip and lines
 chipname = "gpiochip0"
 line_offset = 6
@@ -270,6 +276,11 @@ class X728Monitor:
                     self.send_ntfy_notification("power_loss", battery_level, voltage)
                 if battery_level < self.low_battery_threshold:
                     self.handle_low_battery(battery_level, voltage)
+                if battery_level < self.critical_low_threshold:
+                    self.shutdown_at_time = time.time() + RECONNECT_TIMEOUT
+                    log_message("WARNING", f"{RED}Battery is critically low on startup. Initiating shutdown countdown...{ENDC}")
+                    if self.enable_ntfy:
+                        self.send_ntfy_notification("critical_battery", battery_level, voltage)
             else:
                 self.is_unplugged = False
                 log_message("INFO", "System started on AC power")
@@ -732,7 +743,7 @@ def install_as_service(args):
         if os.path.exists(target_script):
             backup_script = f"{target_script}.bak"
             log_message("INFO", f"Backing up existing script to {backup_script}")
-            subprocess.run(["cp", target_script, backup_script], check=True)
+            subprocess.run(["cp", os.path.abspath(__file__), backup_script], check=True)
         subprocess.run(["cp", os.path.abspath(__file__), target_script], check=True)
         subprocess.run(["chmod", "755", target_script], check=True)
         subprocess.run(["chown", f"{USER}:{USER}", target_script], check=True)
