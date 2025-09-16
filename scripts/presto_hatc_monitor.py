@@ -23,7 +23,7 @@
 #
 # Changelog:
 #   Version 1.5.5 (2025-09-14):
-#   - Added verion of script to logmessage on first start for clarity.
+#   - Added version of script to logmessage on first start for clarity.
 #   Version 1.5.4 (2025-09-13):
 #   - Implemented hysteresis logic in the main loop to prevent rapid "chattering"
 #     of unplugged/reconnected events due to minor current fluctuations when the
@@ -125,9 +125,14 @@ BATTERY_CAPACITY_MAH = 1000
 STATE_CHANGE_DEBOUNCE_SECONDS = 5
 
 def log_message(level, message, exit_on_error=True):
-    """
-    Logs a message to the terminal and journald with a consistent format.
-    """
+    """logs messages to systemd-journald using systemd-cat.
+
+    Args:
+        level (_type_): _description_
+        message (_type_): _description_
+        exit_on_error (bool, optional): _description_. Defaults to True.
+    """    
+
     script_name = "presto-UPSc-service"
     
     if level:
@@ -143,9 +148,8 @@ def log_message(level, message, exit_on_error=True):
         sys.exit(1)
 
 def check_dependencies():
-    """
-    Checks for essential dependencies and exits if they are not met.
-    """
+    """checks for required dependencies and logs errors if missing."""
+    
     log_message("INFO", "Checking dependencies...")
     
     python_version = sys.version.split()[0]

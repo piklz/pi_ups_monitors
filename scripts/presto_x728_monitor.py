@@ -40,7 +40,7 @@
 
 import argparse
 import os
-import subprocess
+import subprocess   
 import sys
 import time
 import struct
@@ -79,6 +79,14 @@ i2c_lock = threading.Lock()
 DEBUG_ENABLED = False
 
 def log_message(log_level, console_message, log_file_message=None, exit_on_error=True):
+    """_summary_
+
+    Args:
+        log_level (_type_): _description_
+        console_message (_type_): _description_
+        log_file_message (_type_, optional): _description_. Defaults to None.
+        exit_on_error (bool, optional): _description_. Defaults to True.
+    """    
     if log_level == "DEBUG" and not DEBUG_ENABLED:
         return
     if log_file_message is None:
@@ -103,13 +111,18 @@ def log_message(log_level, console_message, log_file_message=None, exit_on_error
         sys.exit(1)
 
 def check_service_running():
+    """_summary_
+
+    Returns:
+        _type_: _description_
+    """    
     try:
         result = subprocess.run(["systemctl", "is-active", "--quiet", "x728_ups"], check=False)
         if result.returncode == 0:
             ps_result = subprocess.run(["ps", "aux"], capture_output=True, text=True)
             current_pid = str(os.getpid())
             for line in ps_result.stdout.splitlines():
-                if "/usr/local/bin/x728_ups_monitor.py" in line and current_pid not in line:
+                if "/usr/local/bin/presto_x728_ups_monitor.py" in line and current_pid not in line:
                     log_message("DEBUG", f"Found running x728_ups process: {line}")
                     return True
         return False
@@ -118,6 +131,14 @@ def check_service_running():
         return False
 
 def check_dependencies(requires_i2c=True):
+    """_summary_
+
+    Args:
+        requires_i2c (bool, optional): _description_. Defaults to True.
+
+    Returns:
+        _type_: _description_
+    """    
     log_message("INFO", f"Checking dependencies for user {USER}")
     smbus, bus, has_requests = None, None, False
 
@@ -164,6 +185,7 @@ def check_dependencies(requires_i2c=True):
     return smbus, bus, has_requests
 
 def enable_i2c():
+    
     config_file = "/boot/firmware/config.txt"
     log_message("INFO", f"Checking I2C status in {config_file}")
     try:
@@ -195,7 +217,17 @@ except ImportError:
         sys.exit(1)
 
 class X728Monitor:
+    
     def __init__(self, enable_ntfy=False, ntfy_server="https://ntfy.sh", ntfy_topic="x728_UPS_TEST", low_battery_threshold=30, critical_low_threshold=10):
+        """_summary_
+
+        Args:
+            enable_ntfy (bool, optional): _description_. Defaults to False.
+            ntfy_server (str, optional): _description_. Defaults to "https://ntfy.sh".
+            ntfy_topic (str, optional): _description_. Defaults to "x728_UPS_TEST".
+            low_battery_threshold (int, optional): _description_. Defaults to 30.
+            critical_low_threshold (int, optional): _description_. Defaults to 10.
+        """        
         self.enable_ntfy = enable_ntfy
         self.ntfy_server = ntfy_server
         self.ntfy_topic = ntfy_topic
@@ -245,6 +277,7 @@ class X728Monitor:
             log_message("ERROR", f"Failed to check initial power state: {e}", exit_on_error=False)
 
     def read_battery_level(self):
+        
         if bus is None:
             log_message("ERROR", "I2C bus is not available. Cannot read battery level", exit_on_error=False)
             return 0
@@ -352,6 +385,13 @@ class X728Monitor:
             return "Unknown"
 
     def send_ntfy_notification(self, event_type, battery_level, voltage):
+        """_summary_
+
+        Args:
+            event_type (_type_): _description_
+            battery_level (_type_): _description_
+            voltage (_type_): _description_
+        """        
         if not self.enable_ntfy or not HAS_REQUESTS:
             log_message("INFO", f"ntfy notification ({event_type}) skipped: {'ntfy disabled' if not self.enable_ntfy else 'python3-requests not installed'}", exit_on_error=False)
             return
@@ -622,8 +662,8 @@ def install_as_service(args):
         log_message("ERROR", "Service installation must be run as root")
     log_message("INFO", f"Installing x728 UPS monitor service for user {USER}")
 
-    service_file = "/etc/systemd/system/x728_ups.service"
-    target_script = "/usr/local/bin/x728_ups_monitor.py"
+    service_file = "/etc/systemd/system/presto_x728_ups.service"
+    target_script = "/usr/local/bin/presto_x728_ups_monitor.py"
     service_exists = os.path.exists(service_file)
     service_running = False
     service_status = "unknown"
@@ -685,7 +725,7 @@ def install_as_service(args):
         ps_result = subprocess.run(["ps", "aux"], capture_output=True, text=True)
         current_pid = str(os.getpid())
         for line in ps_result.stdout.splitlines():
-            if "/usr/local/bin/x728_ups_monitor.py" in line and current_pid not in line:
+            if "/usr/local/bin/presto_x728_ups_monitor.py" in line and current_pid not in line:
                 pid = line.split()[1]
                 log_message("INFO", f"Terminating residual x728_ups process: PID {pid}")
                 subprocess.run(["kill", "-9", pid], check=True)
@@ -774,12 +814,13 @@ WantedBy=multi-user.target
     sys.exit(0)
 
 def uninstall_service():
+    
     if os.geteuid() != 0:
         log_message("ERROR", "Service uninstallation must be run as root")
     log_message("INFO", f"Uninstalling x728 UPS monitor service for user {USER}")
 
-    service_file = "/etc/systemd/system/x728_ups.service"
-    target_script = "/usr/local/bin/x728_ups_monitor.py"
+    service_file = "/etc/systemd/system/presto_x728_ups.service"
+    target_script = "/usr/local/bin/presto_x728_ups_monitor.py"
     service_exists = os.path.exists(service_file)
     service_running = False
     service_status = "unknown"
