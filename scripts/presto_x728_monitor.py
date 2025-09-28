@@ -3,50 +3,24 @@
 #      _____ ____  ___          _   ____  
 #__  _|___  |___ \( _ )  __   _/ | |___ \ 
 #\ \/ /  / /  __) / _ \  \ \ / / |   __) |
-# >  <  / /  / __/ (_) |  \ V /| |_ / __/ 
+# >  <  / /  / __/ (_) |  \\ V /| |_ / __/ 
 #/_/\_\/_/  |_____\___/    \_/ |_(_)_____|HW v1.2 HAT Battery Monitor for raspberry pi 3,4,5 [piOS/debian based OS]
 #
 # -----------------------------------------------
-#  ! may work on more recent/latest  x728 models with some tweaks to ports 
-#  -- (26 for v2.0+ for example) will update  code when I get an updated model
-#  PS: Since 2024-09-02, Raspberry Pi has finally unified the gpipchip to 0 on 
-#  all Raspberry Pis(Pi, 0, 1, 2, 3, 4, 5). Previously, the gpiochip on the Raspberry Pi 5 was 4.
-# -----------------------------------------------
 # x728 UPS Monitor Script
-# Version: 1.3.0
+# Version: 1.5.1
 # Author: piklz
 # GitHub: https://github.com/piklz/pi_ups_monitor
-# Geekworm Site: https://wiki.geekworm.com/X728-hardware#Power_Jack_and_Connectors
-#                https://wiki.geekworm.com/X728-Software
-#                https://wiki.geekworm.com/X728-script
 # Description:
-#   Monitors the x728 UPS HAT (v1.2, may work with others) on a Raspberry Pi, providing battery voltage,
-#   percentage, and power loss detection via GPIO. Optionally sends notifications via ntfy if --enable-ntfy is used.
-#   Installable as a systemd service. Logs to systemd-journald with rotation managed by journald.
+#   Monitors the x728 UPS HAT (v1.2, may work with others) on a Raspberry Pi.
+#   Implements a dedicated I2C Sampler Thread to prevent service hang (v1.5.0 fix).
 #
 # Changelog:
-#   Version 1.3.0 (2025-09-16):
-#     - **CRITICAL FIX**: Replaced the blocking shutdown timer and infinite shutdown loop with a non-blocking, event-driven model.
-#     - Now responds instantly to AC power restoration during the shutdown countdown.
-#     - Removed the infinite loop in shutdown_sequence to allow a proper system shutdown.
-#     - **NEW**: Added an initial state check on startup to handle cases where the script starts after power has already been lost.
-#     - Streamlined power monitoring logic to be handled primarily by the GPIO event thread.
-#   Version 1.2.0 (2025-09-16):
-#     - **CRITICAL FIX**: Replaced the blocking shutdown timer and infinite shutdown loop with a non-blocking, event-driven model.
-#     - Now responds instantly to AC power restoration during the shutdown countdown.
-#     - Removed the infinite loop in shutdown_sequence to allow a proper system shutdown.
-#     - Streamlined power monitoring logic to be handled primarily by the GPIO event thread.
-#   Version 1.1.0 (2025-09-14):
-#     - Added est. time remaining(battery) to notifications + short args for command-line options for easier use.
-#   Version 1.0.23 (2025-08-21):
-#     - Fixed install_as_service reinstall tip to display actual argument values instead of placeholders.
-#   Version 1.0.22 (2025-08-21):
-#     - Improved install_as_service to check if service is loaded before running systemctl reset-failed, preventing non-critical error when unit is not loaded.
-#     - Log reset-failed failures as WARNING instead of ERROR for clarity.
-#   Version 1.0.21 (2025-08-21):
-#     - Fixed ValueError in --help by escaping % in argparse help text for threshold arguments.
-#   Version 1.0.20 (2025-08-21):
-#     - Enhanced --install_as_service to stop, disable, and reset service state before reinstalling.
+#   Version 1.5.1 (2025-09-28):
+#     - **CRITICAL TRANSITION FIX**: Added logic to the periodic check to initiate the shutdown countdown and send the critical notification when the battery level drops
+#       below the critical threshold *while* the system is already running on battery power.(if x728 is powered up for first time on battery . it will check battery level and initiate shutdown if critical)
+#       This ensures that the shutdown sequence is always initiated correctly, even if the battery level crosses the critical threshold during normal operation.
+#     - Improved logging and notification clarity(journal).
 # -----------------------------------------------
 
 import argparse
@@ -71,19 +45,20 @@ USER = os.getenv("SUDO_USER") or os.getenv("USER") or os.popen("id -un").read().
 # Global settings
 GPIO_PORT = 13
 I2C_ADDR = 0x36
+I2C_SAMPLE_INTERVAL = 30 # Time in seconds between I2C samples for battery/voltage updates
 LOW_BATTERY_THRESHOLD = 30
 CRITICAL_LOW_THRESHOLD = 10
 RECONNECT_TIMEOUT = 60
 RED = '\033[91m'
 GREEN = '\033[92m'
 ENDC = '\033[0m'
-SCRIPT_VERSION = "1.3.0"
+SCRIPT_VERSION = "1.5.1"
 # Define the chip and lines
 chipname = "gpiochip0"
 line_offset = 6
 out_line_offset = 13
 
-# I2C lock for thread safety
+# I2C lock for thread safety (only used by the sampler thread)
 i2c_lock = threading.Lock()
 
 # Global debug flag
@@ -100,14 +75,20 @@ def log_message(log_level, console_message, log_file_message=None, exit_on_error
     valid_priorities = ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"]
     priority = log_level.lower() if log_level.lower() in valid_priorities else "info"
     try:
+        # Added a short timeout for systemd-cat to prevent potential service hang
         subprocess.run(
             ["systemd-cat", "-t", "x728_ups", "-p", priority],
             input=journal_message,
             text=True,
-            check=True
+            check=True,
+            timeout=5
         )
     except subprocess.CalledProcessError as e:
-        print(f"[x728-UPS-service] [ERROR] Failed to log to journald: {e}", file=sys.stderr)
+        # Fallback print to stderr if systemd-cat fails
+        print(f"[x728-UPS-service] [ERROR] Failed to log to journald via systemd-cat: {e}", file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        print(f"[x728-UPS-service] [ERROR] systemd-cat timeout (5s) for message: {log_file_message}", file=sys.stderr)
+    
     if sys.stdin.isatty():
         color = {"INFO": COL_INFO, "WARNING": COL_WARNING, "ERROR": COL_ERROR, "DEBUG": COL_INFO}.get(log_level, COL_NC)
         print(f"[x728-UPS-service] {color}[{log_level}]{COL_NC} {console_message}")
@@ -130,92 +111,48 @@ def check_service_running():
         log_message("WARNING", f"Failed to check service status: {e.stderr}", exit_on_error=False)
         return False
 
-def check_dependencies(requires_i2c=True):
-    """Checks for necessary dependencies like python3-smbus and python3-gpiod."""    
-    log_message("INFO", f"Checking dependencies for user {USER}")
-    smbus, bus, has_requests = None, None, False
+# -------------------------------------------------------------
+# Dependency Imports and Setup (Non-Blocking)
+# -------------------------------------------------------------
+smbus, bus, HAS_REQUESTS = None, None, False
 
-    if not os.path.exists("/usr/bin/python3"):
-        log_message("ERROR", "python3 is not installed. Please install it with 'sudo apt install python3'")
-        return None, None, False
-
-    log_message("INFO", f"Python3 is installed: {subprocess.getoutput('python3 --version')}")
-
+# Try importing critical I2C and requests libraries
+try:
+    import smbus
+    log_message("DEBUG", "smbus imported successfully.")
     try:
-        import requests
-        log_message("INFO", "python3-requests is installed")
-        has_requests = True
-    except ImportError:
-        log_message("INFO", "python3-requests is not installed. ntfy notifications disabled", exit_on_error=False)
+        bus = smbus.SMBus(1)
+        # We don't attempt a dummy read here to prevent blocking initial startup.
+        log_message("DEBUG", "I2C bus object created successfully.")
+    except Exception:
+        bus = None # I2C bus is not functional
+        log_message("WARNING", "I2C bus not accessible (might not be enabled).", exit_on_error=False)
+except ImportError:
+    smbus = None
+    log_message("WARNING", "python3-smbus not installed. I2C features disabled.", exit_on_error=False)
 
-    if requires_i2c:
-        try:
-            import smbus
-            log_message("INFO", "python3-smbus is installed")
-            try:
-                bus = smbus.SMBus(1)
-                bus.read_byte(I2C_ADDR)
-                log_message("INFO", "smbus module is functional")
-            except Exception as e:
-                log_message("ERROR", f"smbus module failed to access I2C bus: {e}")
-                return smbus, None, has_requests
-        except ImportError:
-            log_message("ERROR", "python3-smbus is not installed. Please install it with 'sudo apt install python3-smbus'")
-            return None, None, has_requests
-
-    try:
-        import gpiod
-        log_message("INFO", "python3-gpiod is installed")
-    except ImportError:
-        log_message("ERROR", "python3-gpiod is not installed. Please install it with 'sudo apt install python3-gpiod'")
-        return smbus, bus, has_requests
-
-    if os.path.exists("/usr/bin/vcgencmd"):
-        log_message("INFO", "libraspberrypi-bin is installed")
-    else:
-        log_message("WARNING", "libraspberrypi-bin not installed, GPU temp unavailable", exit_on_error=False)
-
-    return smbus, bus, has_requests
-
-def enable_i2c():
-    """Checks if I2C is enabled in config.txt and the i2c-dev module is loaded."""
-    config_file = "/boot/firmware/config.txt"
-    log_message("INFO", f"Checking I2C status in {config_file}")
-    try:
-        with open(config_file, "r") as f:
-            if "dtparam=i2c_arm=on" not in f.read():
-                log_message("ERROR", f"I2C is not enabled in {config_file}. Please enable it with 'sudo raspi-config'")
-        log_message("INFO", f"I2C is enabled in {config_file}")
-    except FileNotFoundError:
-        log_message("ERROR", f"{config_file} not found. Please enable I2C manually")
-
-    result = subprocess.run(["lsmod"], capture_output=True, text=True)
-    if "i2c_dev" not in result.stdout:
-        log_message("ERROR", "i2c-dev module is not loaded. Please load it with 'sudo modprobe i2c-dev'")
-    else:
-        log_message("INFO", "i2c-dev module is loaded")
-
-# Check dependencies for --help (no I2C/GPIO needed)
-if "--help" in sys.argv or "-h" in sys.argv:
-    _, _, HAS_REQUESTS = check_dependencies(requires_i2c=False)
-else:
-    smbus, bus, HAS_REQUESTS = check_dependencies(requires_i2c=True)
-    enable_i2c()
+try:
+    import requests
+    HAS_REQUESTS = True
+    log_message("DEBUG", "requests imported successfully.")
+except ImportError:
+    log_message("WARNING", "python3-requests not installed. ntfy notifications disabled.", exit_on_error=False)
+    pass
 
 try:
     import gpiod
+    log_message("DEBUG", "gpiod imported successfully.")
 except ImportError:
+    # Only exit if not using --help and gpiod is needed for core logic
     if "--help" not in sys.argv and "-h" not in sys.argv:
-        log_message("ERROR", "python3-gpiod is required but not installed. Please install it")
+        log_message("ERROR", "python3-gpiod is required but not installed. Exiting.", exit_on_error=True)
         sys.exit(1)
+
+# -------------------------------------------------------------
 
 def get_time_remaining(battery_level):
     """
     Estimates the remaining battery life in hours, minutes, and seconds.
-    Note: This is a linear estimate based on a full-charge run time of 7 hours,
-    which assumes an average current draw of ~1000mA for a 7000mAh battery pack.
-    A more accurate calculation would require real-time current draw data from
-    the I2C chip, which is not read by this script.
     """
     # Total run time at 100% capacity in seconds (7 hours based on 7000mAh total capacity)
     TOTAL_RUN_TIME_SECONDS = 7 * 60 * 60
@@ -237,41 +174,142 @@ class X728Monitor:
         self.ntfy_topic = ntfy_topic
         self.low_battery_threshold = low_battery_threshold
         self.critical_low_threshold = critical_low_threshold
+        
+        # Power/State variables
         self.is_unplugged = False
         self.last_notification = None
         self.notification_cooldown = timedelta(minutes=5)
         self.low_battery_notified = False
-        self.shutdown_at_time = None # Use a timestamp for non-blocking timer
+        self.shutdown_at_time = None
         self.notification_queue = []
 
+        # I2C Sampled State (updated by sampler thread)
+        self._battery_level = 0.0
+        self._voltage = 0.0
+        self._i2c_ready = False # Flag indicating the sampler thread has a first successful read
+        self._i2c_stop_event = threading.Event()
+        
         # GPIO setup
         self.chip = None
         self.line = None
         self.out_line = None
         try:
+            if 'gpiod' not in sys.modules:
+                 raise ImportError("gpiod module failed to load.")
             self.chip = gpiod.Chip(chipname)
             self.line = self.chip.get_line(line_offset)
             self.line.request(consumer="x728_ups_monitor", type=gpiod.LINE_REQ_EV_BOTH_EDGES)
             self.out_line = self.chip.get_line(out_line_offset)
             self.out_line.request(consumer="x728_ups_monitor", type=gpiod.LINE_REQ_DIR_OUT)
+            log_message("DEBUG", "GPIO initialized successfully.")
         except Exception as e:
-            log_message("ERROR", f"Failed to initialize GPIO: {e}")
+            # Do not log here, as the main function's try/except handles the logging and graceful exit
             raise
 
-        # Check initial power state
+        # Start the non-blocking I2C sampler thread
+        self.i2c_thread = threading.Thread(target=self._i2c_sampler_thread, daemon=True)
+        self.i2c_thread.start()
+
+        # Check initial power state (will wait for first I2C sample)
         self.check_initial_power_state()
+
+    def _direct_i2c_read(self, register_addr):
+        """
+        Performs a single, blocking I2C read from the bus with basic error handling.
+        This should ONLY be called from the dedicated sampler thread.
+        Returns the processed value or None on failure.
+        """
+        if bus is None:
+            log_message("DEBUG", "I2C bus not available for direct read.", exit_on_error=False)
+            return None
+        
+        try:
+            read = bus.read_word_data(I2C_ADDR, register_addr)
+            swapped = struct.unpack("<H", struct.pack(">H", read))[0]
+            return swapped
+        except Exception as e:
+            log_message("DEBUG", f"Direct I2C read failed at 0x{register_addr:02X}: {e}", exit_on_error=False)
+            return None
+
+    def _sample_i2c_data(self):
+        """
+        Attempts to sample battery level and voltage up to 3 times.
+        Updates internal state variables upon success.
+        Returns True if a valid sample was obtained, False otherwise.
+        """
+        log_message("DEBUG", "Sampler thread attempting I2C read...", exit_on_error=False)
+        for attempt in range(3):
+            with i2c_lock:
+                # Read Battery Level (Register 0x04)
+                level_data = self._direct_i2c_read(0x04)
+                # Read Voltage (Register 0x02)
+                voltage_data = self._direct_i2c_read(0x02)
+            
+            if level_data is not None and voltage_data is not None:
+                capacity = min(level_data / 256.0, 100.0)
+                voltage = voltage_data * 1.25 / 1000 / 16
+                
+                # Basic sanity check
+                if 0 <= capacity <= 100 and 2.5 <= voltage <= 5.5:
+                    self._battery_level = capacity
+                    self._voltage = voltage
+                    self._i2c_ready = True
+                    log_message("DEBUG", f"I2C Sample Success. Level: {capacity:.1f}%, Voltage: {voltage:.3f}V", exit_on_error=False)
+                    return True
+                else:
+                    log_message("WARNING", f"I2C Sample Invalid Data (Level: {capacity:.1f}%, Voltage: {voltage:.3f}V). Retrying...", exit_on_error=False)
+            
+            time.sleep(0.1) # Short delay between retries
+            
+        log_message("WARNING", "I2C Sample Failed after 3 attempts.", exit_on_error=False)
+        return False
+        
+    def _i2c_sampler_thread(self):
+        """Dedicated thread to periodically sample I2C data without blocking core logic."""
+        log_message("INFO", "I2C Sampler thread started.")
+        while not self._i2c_stop_event.is_set():
+            # If the sampler fails, it keeps the old value (default 0.0) and tries again after the interval.
+            self._sample_i2c_data()
+            self._i2c_stop_event.wait(I2C_SAMPLE_INTERVAL)
+        log_message("INFO", "I2C Sampler thread stopped.")
+
+    def read_battery_level(self):
+        """Non-blocking accessor for the last sampled battery percentage."""
+        return self._battery_level
+
+    def read_voltage(self):
+        """Non-blocking accessor for the last sampled voltage."""
+        return self._voltage
 
     def check_initial_power_state(self):
         """Checks the power state at startup and logs/notifies as needed."""
+        log_message("INFO", "First Run Check initiated.") 
+        
+        # Wait up to 5 seconds for the I2C sampler thread to get its first reading
+        start_time = time.time()
+        while not self._i2c_ready and time.time() - start_time < 5:
+            log_message("DEBUG", "Waiting for first I2C sample...", exit_on_error=False)
+            time.sleep(0.5)
+
+        if not self._i2c_ready:
+            log_message("ERROR", "I2C sampler failed to get a reading within 5 seconds. Using 0.0%% for initialization.", exit_on_error=False)
+
         try:
             power_state = self.line.get_value()
+            battery_level = self.read_battery_level() # Non-blocking read
+            voltage = self.read_voltage()             # Non-blocking read
+            
             if power_state == 1:
                 self.is_unplugged = True
-                with i2c_lock:
-                    battery_level = self.read_battery_level()
-                    voltage = self.read_voltage()
+                log_message("INFO", "Running on Battery. Checking levels now:") 
+                
                 time_remaining = get_time_remaining(battery_level)
-                log_message("WARNING", f"{RED}System started on battery power. Battery level: {battery_level:.1f}% ({time_remaining}){ENDC}")
+                
+                status = 'CRITICAL' if battery_level < self.critical_low_threshold else ('LOW' if battery_level < self.low_battery_threshold else 'NORMAL')
+                log_message("WARNING", 
+                            f"{RED}First Run Check: System started on BATTERY POWER. Status: {status}. Level: {battery_level:.1f}%% ({time_remaining}){ENDC}",
+                            log_file_message=f"First Run Check: System started on BATTERY POWER. Status: {status}. Level: {battery_level:.1f}% ({time_remaining})")
+                
                 if self.enable_ntfy:
                     self.send_ntfy_notification("power_loss", battery_level, voltage)
                 if battery_level < self.low_battery_threshold:
@@ -283,51 +321,14 @@ class X728Monitor:
                         self.send_ntfy_notification("critical_battery", battery_level, voltage)
             else:
                 self.is_unplugged = False
-                log_message("INFO", "System started on AC power")
+                log_message("INFO", "First Run Check: System started on AC power. Status: NORMAL.")
         except Exception as e:
             log_message("ERROR", f"Failed to check initial power state: {e}", exit_on_error=False)
 
-    def read_battery_level(self):
-        """Reads the battery percentage from the I2C chip."""
-        if bus is None:
-            log_message("ERROR", "I2C bus is not available. Cannot read battery level", exit_on_error=False)
-            return 0
-        for attempt in range(3):
-            try:
-                read = bus.read_word_data(I2C_ADDR, 4)
-                swapped = struct.unpack("<H", struct.pack(">H", read))[0]
-                log_message("DEBUG", f"Raw battery level data: read={read}, swapped={swapped}")
-                capacity = min(swapped / 256.0, 100.0)  # Clamp to 100%
-                if 0 <= capacity <= 100:
-                    return capacity
-                else:
-                    log_message("WARNING", f"Invalid battery level read: {capacity}. Retrying...", exit_on_error=False)
-            except Exception as e:
-                log_message("ERROR", f"Failed to read battery level (attempt {attempt + 1}/3): {e}", exit_on_error=False)
-            time.sleep(0.1)
-        log_message("ERROR", "Failed to read valid battery level after 3 attempts", exit_on_error=False)
-        return 0
-
-    def read_voltage(self):
-        """Reads the battery voltage from the I2C chip."""
-        if bus is None:
-            log_message("ERROR", "I2C bus is not available. Cannot read voltage", exit_on_error=False)
-            return 0
-        for attempt in range(3):
-            try:
-                read = bus.read_word_data(I2C_ADDR, 2)
-                swapped = struct.unpack("<H", struct.pack(">H", read))[0]
-                log_message("DEBUG", f"Raw voltage data: read={read}, swapped={swapped}")
-                voltage = swapped * 1.25 / 1000 / 16
-                if 2.5 <= voltage <= 5.5:
-                    return voltage
-                else:
-                    log_message("WARNING", f"Invalid voltage read: {voltage}. Retrying...", exit_on_error=False)
-            except Exception as e:
-                log_message("ERROR", f"Failed to read voltage (attempt {attempt + 1}/3): {e}", exit_on_error=False)
-            time.sleep(0.1)
-        log_message("ERROR", "Failed to read valid voltage after 3 attempts", exit_on_error=False)
-        return 0
+    @staticmethod
+    def get_time_remaining_static(battery_level):
+        """Static wrapper for estimation."""
+        return get_time_remaining(battery_level)
 
     @staticmethod
     def get_cpu_temp():
@@ -416,7 +417,7 @@ class X728Monitor:
                 ip = self.get_ip_address()
                 cpu_temp = self.get_cpu_temp()
                 gpu_temp = self.get_gpu_temp()
-                est_time_remaining = get_time_remaining(battery_level)
+                est_time_remaining = self.get_time_remaining_static(battery_level)
                 temp_info = (
                     f"CPU: {cpu_temp:.1f}°C, GPU: {gpu_temp:.1f}°C"
                     if cpu_temp is not None and gpu_temp is not None
@@ -478,68 +479,17 @@ class X728Monitor:
             else:
                 log_message("INFO", f"Notification ({event_type}) skipped due to cooldown. Will send after {self.notification_cooldown.total_seconds() - (current_time - self.last_notification).total_seconds():.1f} seconds")
 
-    def process_notification_queue(self):
-        """Processes and sends queued notifications."""
-        if not self.enable_ntfy or not HAS_REQUESTS or not self.notification_queue or self.last_notification is None:
-            return
-        current_time = datetime.now()
-        if (current_time - self.last_notification) >= self.notification_cooldown:
-            self.notification_queue.sort(key=lambda x: x[0], reverse=True)
-            events_to_send = self.notification_queue[:2]
-            extra_events = len(self.notification_queue) - 2 if len(self.notification_queue) > 2 else 0
-            for i, (timestamp, event_type, battery_level, voltage) in enumerate(events_to_send):
-                try:
-                    import requests
-                    hostname = self.get_hostname()
-                    ip = self.get_ip_address()
-                    cpu_temp = self.get_cpu_temp()
-                    gpu_temp = self.get_gpu_temp()
-                    temp_info = (
-                        f"CPU: {cpu_temp:.1f}°C, GPU: {gpu_temp:.1f}°C"
-                        if cpu_temp is not None and gpu_temp is not None
-                        else "Temp unavailable"
-                    )
-                    message = None
-                    title = None
-                    if event_type == "power_loss":
-                        time_remaining = get_time_remaining(battery_level)
-                        message = f"⚠️🔌 AC Power Loss on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Est. Time Remaining: {time_remaining}, Temps: {temp_info}"
-                        title = "x728 UPS Power Loss"
-                    elif event_type == "power_restored":
-                        message = f"✅🔋 AC Power Restored on {hostname} (IP: {ip}): Battery at {battery_level:.1f}% ({voltage:.3f}V), Temps: {temp_info}"
-                        title = "x728 UPS Power Restored"
-                    if extra_events > 0 and i == 1:
-                        message += f"\n...+{extra_events} similar events, please check journal"
-                    if message and title:
-                        response = requests.post(
-                            f"{self.ntfy_server}/{self.ntfy_topic}",
-                            data=message.encode('utf-8'),
-                            headers={"Title": title.encode('utf-8')}
-                        )
-                        if response.status_code == 200:
-                            log_message("INFO", f"Queued notification sent successfully: {message}")
-                            self.last_notification = current_time
-                        else:
-                            log_message("WARNING", f"Failed to send queued notification: HTTP {response.status_code} - {response.text}", exit_on_error=False)
-                except requests.exceptions.RequestException as e:
-                    log_message("WARNING", f"Failed to send queued notification: Network error - {e}", exit_on_error=False)
-                except Exception as e:
-                    log_message("WARNING", f"Failed to send queued notification: Unexpected error - {e}", exit_on_error=False)
-            self.notification_queue = []
-            log_message("INFO", "Notification queue cleared")
-    
     def handle_low_battery(self, battery_level, voltage):
         """Handles the low battery event."""
         if not self.low_battery_notified:
-            time_remaining = get_time_remaining(battery_level)
-            log_message("WARNING", f"{RED}Battery level is low ({battery_level:.1f}%). Est. Time Remaining: {time_remaining}. Monitoring for critical threshold...{ENDC}")
+            time_remaining = self.get_time_remaining_static(battery_level)
+            log_message("WARNING", f"{RED}Battery level is low ({battery_level:.1f}%%). Est. Time Remaining: {time_remaining}. Monitoring for critical threshold...{ENDC}")
             if self.enable_ntfy:
                 self.send_ntfy_notification("low_battery", battery_level, voltage)
     
     def shutdown_sequence(self, battery_level, voltage):
         """
         Initiates the system shutdown process.
-        This function no longer blocks, it triggers the shutdown and exits.
         """
         log_message("WARNING", f"{RED}SHUTDOWN SEQUENCE COMMENCING...{ENDC}")
         if self.enable_ntfy:
@@ -553,7 +503,8 @@ class X728Monitor:
             log_message("ERROR", f"Shutdown sequence failed: {e}", exit_on_error=False)
 
     def close(self):
-        """Releases GPIO resources."""
+        """Releases resources."""
+        self._i2c_stop_event.set() # Stop the sampler thread
         try:
             if hasattr(self, 'line') and self.line:
                 self.line.release()
@@ -568,35 +519,24 @@ class X728Monitor:
 def pld_event(monitor, event):
     """
     Handles GPIO power loss/restoration events.
-    This function now sets a non-blocking timer for shutdown.
+    Uses non-blocking accessors for battery/voltage.
     """
     try:
-        for attempt in range(3):
-            try:
-                with i2c_lock:
-                    battery_level = monitor.read_battery_level()
-                    voltage = monitor.read_voltage()
-                break
-            except Exception as e:
-                log_message("ERROR", f"GPIO event I2C read failed (attempt {attempt + 1}/3): {e}", exit_on_error=False)
-                if attempt < 2:
-                    time.sleep(0.1)
-                else:
-                    battery_level, voltage = 0, 0
-                    break
+        battery_level = monitor.read_battery_level()
+        voltage = monitor.read_voltage()
 
         if event.type == gpiod.LineEvent.RISING_EDGE:
             monitor.is_unplugged = True
-            time_remaining = get_time_remaining(battery_level)
+            time_remaining = monitor.get_time_remaining_static(battery_level)
             log_message("WARNING", f"{RED}---AC Power Loss OR Power Adapter Failure---{ENDC}")
-            log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V, Est. Time Remaining: {time_remaining}")
+            log_message("INFO", f"Battery level: {battery_level:.1f}%%, Voltage: {voltage:.3f}V, Est. Time Remaining: {time_remaining}")
             if monitor.enable_ntfy:
                 monitor.send_ntfy_notification("power_loss", battery_level, voltage)
             if battery_level < monitor.low_battery_threshold:
                 monitor.handle_low_battery(battery_level, voltage)
             if battery_level < monitor.critical_low_threshold:
                 monitor.shutdown_at_time = time.time() + RECONNECT_TIMEOUT
-                log_message("WARNING", f"{RED}Battery level is critically low ({monitor.critical_low_threshold}%) starting shutdown countdown...{ENDC}")
+                log_message("WARNING", f"{RED}Battery level is critically low ({monitor.critical_low_threshold}%%) starting shutdown countdown...{ENDC}")
                 if monitor.enable_ntfy:
                     monitor.send_ntfy_notification("critical_battery", battery_level, voltage)
             monitor.out_line.set_value(0)
@@ -605,62 +545,81 @@ def pld_event(monitor, event):
             monitor.low_battery_notified = False
             monitor.shutdown_at_time = None # Cancel shutdown timer
             log_message("INFO", f"{GREEN}---AC Power Restored---{ENDC}")
-            log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V")
+            log_message("INFO", f"Battery level: {battery_level:.1f}%%, Voltage: {voltage:.3f}V")
             log_message("INFO", "Shutdown timer cancelled due to AC power restoration")
             if monitor.enable_ntfy:
                 monitor.send_ntfy_notification("power_restored", battery_level, voltage)
             monitor.out_line.set_value(0)
 
         if sys.stdin.isatty():
-            time_remaining = get_time_remaining(battery_level)
-            log_message("INFO", f"Current state: {'Battery' if monitor.is_unplugged else 'AC Power'}, Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V, Est. Time Remaining: {time_remaining}")
+            time_remaining = monitor.get_time_remaining_static(battery_level)
+            log_message("INFO", f"Current state: {'Battery' if monitor.is_unplugged else 'AC Power'}, Battery level: {battery_level:.1f}%%, Voltage: {voltage:.3f}V, Est. Time Remaining: {time_remaining}")
     except Exception as e:
         log_message("ERROR", f"GPIO event handling failed: {e}", exit_on_error=False)
 
-def gpio_event_thread(monitor):
+def gpio_and_shutdown_thread(monitor):
     """
-    Thread to listen for GPIO events and handle the shutdown countdown.
+    Thread to listen for GPIO events and handle the shutdown countdown/periodic logging.
+    This thread is non-blocking with respect to I2C.
     """
+    last_periodic_log = time.time()
+    
     while True:
         try:
-            # Check for a pending shutdown
+            # 1. Check for a pending shutdown
             if monitor.shutdown_at_time and time.time() >= monitor.shutdown_at_time:
-                with i2c_lock:
-                    battery_level = monitor.read_battery_level()
-                    voltage = monitor.read_voltage()
-                monitor.shutdown_sequence(battery_level, voltage)
-            
-            # Read GPIO events
+                battery_level = monitor.read_battery_level()
+                voltage = monitor.read_voltage()
+                monitor.shutdown_sequence(battery_level, voltage) # This will exit the script
+
+            # 2. Read GPIO events (Blocking wait with timeout)
             event = monitor.line.event_wait(1) # Wait for 1 second
             if event:
                 event = monitor.line.event_read()
                 pld_event(monitor, event)
             
-            # Periodically read battery level and report/notify if on battery
-            if monitor.is_unplugged:
-                with i2c_lock:
-                    battery_level = monitor.read_battery_level()
-                    voltage = monitor.read_voltage()
-                log_message("INFO", f"Battery level: {battery_level:.1f}%, Voltage: {voltage:.3f}V")
-                if battery_level <= monitor.low_battery_threshold and not monitor.low_battery_notified:
-                    monitor.handle_low_battery(battery_level, voltage)
+            # 3. Periodic status check/logging (every 60 seconds)
+            if time.time() - last_periodic_log >= 60:
+                battery_level = monitor.read_battery_level()
+                voltage = monitor.read_voltage()
+                log_message("INFO", f"Periodic Status: Battery level: {battery_level:.1f}%%, Voltage: {voltage:.3f}V")
+                
+                # Check low battery condition again if running on battery
+                if monitor.is_unplugged:
+                    if battery_level <= monitor.low_battery_threshold:
+                        monitor.handle_low_battery(battery_level, voltage)
 
-            time.sleep(1) # Main loop sleep
+                    # *** NEW CRITICAL TRANSITION CHECK (v1.5.1 fix) ***
+                    # If battery is critical AND shutdown timer has NOT been initiated, start the countdown.
+                    if battery_level <= monitor.critical_low_threshold and monitor.shutdown_at_time is None:
+                        monitor.shutdown_at_time = time.time() + RECONNECT_TIMEOUT
+                        log_message("WARNING", f"{RED}Periodic Check: Battery dropped to critical level ({battery_level:.1f}%%). Initiating shutdown countdown...{ENDC}")
+                        if monitor.enable_ntfy:
+                            monitor.send_ntfy_notification("critical_battery", battery_level, voltage)
+                    # **************************************************
+                
+                last_periodic_log = time.time()
             
         except KeyboardInterrupt:
             log_message("INFO", "Exiting GPIO event thread...")
             break
         except Exception as e:
-            log_message("ERROR", f"GPIO event thread error: {e}. Restarting thread...", exit_on_error=False)
-            time.sleep(0.5)
+            log_message("ERROR", f"GPIO event thread error: {e}. Restarting loop...", exit_on_error=False)
+            time.sleep(1)
+
+
+# --- Installation and Uninstallation functions remain the same as 1.4.3 ---
 
 def test_ntfy(ntfy_server, ntfy_topic):
     log_message("INFO", "Testing ntfy connectivity")
-    monitor = X728Monitor(enable_ntfy=True, ntfy_server=ntfy_server, ntfy_topic=ntfy_topic)
     try:
-        monitor.send_ntfy_notification("test", 0, 0)
+        monitor = X728Monitor(enable_ntfy=True, ntfy_server=ntfy_server, ntfy_topic=ntfy_topic)
+        monitor.send_ntfy_notification("test", monitor.read_battery_level(), monitor.read_voltage())
+    except Exception as e:
+        log_message("ERROR", f"ntfy test failed during X728Monitor initialization: {e}")
     finally:
-        monitor.close()
+        if 'monitor' in locals():
+            monitor.close()
 
 def install_as_service(args):
     if os.geteuid() != 0:
@@ -723,7 +682,7 @@ def install_as_service(args):
                 log_message("INFO", "Skipping reset-failed as service is not loaded")
             time.sleep(1)  # Wait for systemd to release resources
         except subprocess.CalledProcessError as e:
-            log_message("ERROR", f"Failed to stop or disable service: {e.stderr}", exit_on_error=False)
+            log_message("ERROR", f"Failed to stop or disable service: {e.stderr}")
 
     # Kill any residual processes
     try:
@@ -744,6 +703,7 @@ def install_as_service(args):
             backup_script = f"{target_script}.bak"
             log_message("INFO", f"Backing up existing script to {backup_script}")
             subprocess.run(["cp", os.path.abspath(__file__), backup_script], check=True)
+        # Note: This line uses the temporary file of the currently running script, which holds the v1.5.1 code
         subprocess.run(["cp", os.path.abspath(__file__), target_script], check=True)
         subprocess.run(["chmod", "755", target_script], check=True)
         subprocess.run(["chown", f"{USER}:{USER}", target_script], check=True)
@@ -925,6 +885,10 @@ Useful journalctl commands for monitoring:
     global DEBUG_ENABLED
     DEBUG_ENABLED = args.debug
 
+    # V1.4.2 ADDITION: Immediate Log Check to confirm execution is past argparser.
+    log_message("INFO", f"Script started successfully (Version {SCRIPT_VERSION}). Proceeding with initialization.")
+
+
     # Validate argument combinations
     if args.install_as_service and (args.uninstall or args.test_ntfy):
         log_message("ERROR", "Cannot use --install_as_service with --uninstall or --test-ntfy")
@@ -935,11 +899,12 @@ Useful journalctl commands for monitoring:
 
     if args.low_battery_threshold <= args.critical_low_threshold:
         log_message("ERROR", f"Low battery threshold ({args.low_battery_threshold}%%) must be greater than critical low threshold ({args.critical_low_threshold}%%)")
+    
     if not (0 <= args.low_battery_threshold <= 100) or not (0 <= args.critical_low_threshold <= 100):
         log_message("ERROR", "Battery thresholds must be between 0 and 100%%")
 
     # Check for running service if GPIO access is needed
-    requires_gpio = not (args.install_as_service or args.uninstall or ("-h" in sys.argv or "--help" in sys.argv))
+    requires_gpio = not (args.install_as_service or args.uninstall or ("-h" in sys.argv or "--help" in sys.argv or args.test_ntfy))
     if requires_gpio and check_service_running():
         log_message("ERROR", "The x728_ups service is running, which is using GPIO resources. Stop the service first with: sudo systemctl stop presto_x728_ups.service")
 
@@ -957,21 +922,27 @@ Useful journalctl commands for monitoring:
         parser.print_help()
         sys.exit(0)
 
-    if smbus is None or bus is None:
-        log_message("ERROR", "Critical dependency smbus or I2C bus is missing. Exiting.")
-        sys.exit(1)
+    if smbus is None:
+        log_message("ERROR", "Critical dependency smbus is missing. Exiting.", exit_on_error=True)
+    if bus is None:
+        log_message("WARNING", "I2C bus object could not be created. I2C Sampler will likely fail.", exit_on_error=False)
+
 
     log_message("WARNING", f"CRITICAL_LOW_THRESHOLD is set to {args.critical_low_threshold}%% for testing.")
 
-    monitor = X728Monitor(
-        enable_ntfy=args.enable_ntfy,
-        ntfy_server=args.ntfy_server,
-        ntfy_topic=args.ntfy_topic,
-        low_battery_threshold=args.low_battery_threshold,
-        critical_low_threshold=args.critical_low_threshold
-    )
+    try:
+        monitor = X728Monitor(
+            enable_ntfy=args.enable_ntfy,
+            ntfy_server=args.ntfy_server,
+            ntfy_topic=args.ntfy_topic,
+            low_battery_threshold=args.low_battery_threshold,
+            critical_low_threshold=args.critical_low_threshold
+        )
+    except Exception as e:
+        log_message("ERROR", f"Failed to initialize X728Monitor. The underlying error was: {e}. Exiting.")
+        sys.exit(1)
     
-    gpio_thread = threading.Thread(target=gpio_event_thread, args=(monitor,), daemon=True)
+    gpio_thread = threading.Thread(target=gpio_and_shutdown_thread, args=(monitor,), daemon=True)
     gpio_thread.start()
 
     try:
