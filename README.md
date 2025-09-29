@@ -125,36 +125,37 @@ Useful journalctl commands for monitoring:
   - Debug logs (if --debug enabled): journalctl -u presto_x728_ups.service | grep DEBUG -m 10
 ```
 
-#### For Waveshare UPS HAT (C) (`presto_hatc_monitor.py v1.5.4`)
+#### For Waveshare UPS HAT (C) (`presto_hatc_monitor.py v1.5.5`)
 ```bash
-usage: presto_hatc_monitor.py [-h] [-i] [-u] [-ntfy] [-nt NTFY_TOPIC] [-ns NTFY_SERVER] [-t] [--power-threshold POWER_THRESHOLD]
-                              [--percent-threshold PERCENT_THRESHOLD] [--critical-low-threshold CRITICAL_LOW_THRESHOLD]
-                              [--critical-shutdown-delay CRITICAL_SHUTDOWN_DELAY] [--battery-capacity-mah BATTERY_CAPACITY_MAH]
-                              [--ntfy-cooldown-seconds NTFY_COOLDOWN_SECONDS]
+usage: presto_hatc_monitor.py [-h] [-i] [-u] [-ntfy] [-nt NTFY_TOPIC] [-ns NTFY_SERVER] [-t] [--power-threshold POWER_THRESHOLD] [--percent-threshold PERCENT_THRESHOLD]
+                              [--critical-low-threshold CRITICAL_LOW_THRESHOLD] [--critical-shutdown-delay CRITICAL_SHUTDOWN_DELAY]
+                              [--battery-capacity-mah BATTERY_CAPACITY_MAH] [--ntfy-cooldown-seconds NTFY_COOLDOWN_SECONDS]
+
+Presto HAT C UPS Monitor v1.5.5
 
 options:
   -h, --help            show this help message and exit
   -i, --install_as_service
-                        Install the script as a systemd service
-  -u, --uninstall       Uninstall the systemd service and script
-  -ntfy, --enable-ntfy  Enable ntfy notifications
+                        Install the script as a systemd service.
+  -u, --uninstall       Uninstall the systemd service and script.
+  -ntfy, --enable-ntfy  Enable ntfy notifications.
   -nt NTFY_TOPIC, --ntfy-topic NTFY_TOPIC
-                        ntfy topic name (default: presto_hatc_ups)
+                        ntfy topic name. Defaults to "presto_hatc_ups".
   -ns NTFY_SERVER, --ntfy-server NTFY_SERVER
-                        ntfy server URL (default: https://ntfy.sh)
-  -t, --test-ntfy       Send a test notification and exit
+                        ntfy server URL. Defaults to "https://ntfy.sh".
+  -t, --test-ntfy       Send a test notification and exit.
   --power-threshold POWER_THRESHOLD
-                        Power threshold in Watts to detect power loss
+                        Power threshold in Watts to detect power loss.
   --percent-threshold PERCENT_THRESHOLD
-                        Battery percentage threshold for low battery alert
+                        Battery percentage threshold for low battery alert.
   --critical-low-threshold CRITICAL_LOW_THRESHOLD
-                        Battery percentage threshold for critical low alert, triggering shutdown
+                        Battery percentage threshold for critical low alert, triggering shutdown.
   --critical-shutdown-delay CRITICAL_SHUTDOWN_DELAY
-                        Delay in seconds before shutdown on critical battery level
+                        Delay in seconds before shutdown on critical battery level.
   --battery-capacity-mah BATTERY_CAPACITY_MAH
-                        Battery capacity in mAh for time remaining estimation
+                        Battery capacity in mAh for time remaining estimation.
   --ntfy-cooldown-seconds NTFY_COOLDOWN_SECONDS
-                        Cooldown in seconds between repeated notifications for the same event
+                        Cooldown in seconds between repeated notifications for the same event.
 
 Useful journalctl commands for monitoring:
   - View real-time logs: journalctl -u presto_hatc_monitor.service -f
