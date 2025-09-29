@@ -94,33 +94,35 @@ Set up the Presto UPS Monitor on your Raspberry Pi with these steps. Quick and e
 
 ### Command-Line Options
 
-#### For Geekworm X728 (`presto_x728_monitor.py v1.0.23`)
+#### For Geekworm X728 (`presto_x728_monitor.py v1.5.1`)
 ```bash
-usage: presto_x728_monitor.py [-h] [--install_as_service] [--uninstall] [--test-ntfy] [--enable-ntfy] [--ntfy-server NTFY_SERVER]
-                              [--ntfy-topic NTFY_TOPIC] [--low-battery-threshold LOW_BATTERY_THRESHOLD]
-                              [--critical-low-threshold CRITICAL_LOW_THRESHOLD] [--debug]
+usage: presto_x728_monitor.py [-h] [-i] [-u] [-t] [-ntfy] [-ns NTFY_SERVER] [-nt NTFY_TOPIC] [--low-battery-threshold LOW_BATTERY_THRESHOLD]
+                              [--critical-low-threshold CRITICAL_LOW_THRESHOLD] [-d]
+
+x728 UPS HAT Monitor with Service Installation (Version 1.5.1)
 
 options:
   -h, --help            show this help message and exit
-  --install_as_service  Install as a systemd service
-  --uninstall           Uninstall the x728_ups service
-  --test-ntfy           Send a test ntfy notification (requires --enable-ntfy)
-  --enable-ntfy         Enable ntfy notifications
-  --ntfy-server NTFY_SERVER
+  -i, --install_as_service
+                        Install as a systemd service
+  -u, --uninstall       Uninstall the x728_ups service
+  -t, --test-ntfy       Send a test ntfy notification (requires --enable-ntfy)
+  -ntfy, --enable-ntfy  Enable ntfy notifications (default: False)
+  -ns NTFY_SERVER, --ntfy-server NTFY_SERVER
                         ntfy server URL (default: https://ntfy.sh)
-  --ntfy-topic NTFY_TOPIC
-                        ntfy topic for notifications (default: presto_hatc_ups)
+  -nt NTFY_TOPIC, --ntfy-topic NTFY_TOPIC
+                        ntfy topic for notifications (default: x728_UPS)
   --low-battery-threshold LOW_BATTERY_THRESHOLD
                         Low battery threshold percentage (default: 30%)
   --critical-low-threshold CRITICAL_LOW_THRESHOLD
                         Critical low battery threshold percentage (default: 10%)
-  --debug               Enable debug logging for raw I2C data
+  -d, --debug           Enable debug logging for raw I2C data (default: False)
 
 Useful journalctl commands for monitoring:
-  - Recent battery/voltage logs: journalctl -u x728_ups.service | grep -E "Battery level|Voltage" -m 10
-  - Power event logs: journalctl -u x728_ups.service | grep -E "Power Loss|Power Restored|Shutdown" -m 10
-  - Critical errors: journalctl -u x728_ups.service -p 0..3 -n 10
-  - Debug logs (if --debug enabled): journalctl -u x728_ups.service | grep DEBUG -m 10
+  - Recent battery/voltage logs: journalctl -u presto_x728_ups.service | grep -E "Battery level|Voltage" -m 10
+  - Power event logs: journalctl -u presto_x728_ups.service | grep -E "Power Loss|Power Restored|Shutdown" -m 10
+  - Critical errors: journalctl -u presto_x728_ups.service -p 0..3 -n 10
+  - Debug logs (if --debug enabled): journalctl -u presto_x728_ups.service | grep DEBUG -m 10
 ```
 
 #### For Waveshare UPS HAT (C) (`presto_hatc_monitor.py v1.5.4`)

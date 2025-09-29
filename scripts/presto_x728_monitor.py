@@ -589,14 +589,14 @@ def gpio_and_shutdown_thread(monitor):
                     if battery_level <= monitor.low_battery_threshold:
                         monitor.handle_low_battery(battery_level, voltage)
 
-                    # *** NEW CRITICAL TRANSITION CHECK (v1.5.1 fix) ***
+                    
                     # If battery is critical AND shutdown timer has NOT been initiated, start the countdown.
                     if battery_level <= monitor.critical_low_threshold and monitor.shutdown_at_time is None:
                         monitor.shutdown_at_time = time.time() + RECONNECT_TIMEOUT
                         log_message("WARNING", f"{RED}Periodic Check: Battery dropped to critical level ({battery_level:.1f}%%). Initiating shutdown countdown...{ENDC}")
                         if monitor.enable_ntfy:
                             monitor.send_ntfy_notification("critical_battery", battery_level, voltage)
-                    # **************************************************
+                   
                 
                 last_periodic_log = time.time()
             
@@ -608,7 +608,6 @@ def gpio_and_shutdown_thread(monitor):
             time.sleep(1)
 
 
-# --- Installation and Uninstallation functions remain the same as 1.4.3 ---
 
 def test_ntfy(ntfy_server, ntfy_topic):
     log_message("INFO", "Testing ntfy connectivity")
@@ -885,7 +884,7 @@ Useful journalctl commands for monitoring:
     global DEBUG_ENABLED
     DEBUG_ENABLED = args.debug
 
-    # V1.4.2 ADDITION: Immediate Log Check to confirm execution is past argparser.
+    #Immediate Log Check to confirm execution is past argparser.
     log_message("INFO", f"Script started successfully (Version {SCRIPT_VERSION}). Proceeding with initialization.")
 
 
