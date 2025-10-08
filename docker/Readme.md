@@ -1,5 +1,8 @@
+<div align="center">
+  
 # X728 UPS Monitor 🔋⚡
-
+  
+</div>
 <div align="center">
 
 ![X728 Logo](https://img.shields.io/badge/X728-UPS_Monitor-blue?style=for-the-badge&logo=raspberry-pi)
@@ -59,10 +62,10 @@ mkdir -p ~/x728_monitor
 cd ~/x728_monitor
 
 # Download docker-compose.yml
-wget https://raw.githubusercontent.com/piklz/pi_ups_monitors/main/docker-compose.yml
+wget https://raw.githubusercontent.com/piklz/pi_ups_monitors/main/docker/docker-compose.yml
 
 # Start the service
-docker-compose up -d
+docker compose up -d
 ```
 
 ### Option 2: Docker Run
