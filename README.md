@@ -7,6 +7,8 @@
 [![GitHub Stars](https://img.shields.io/github/stars/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/network/members)
 [![GitHub Issues](https://img.shields.io/github/issues/piklz/pi_ups_monitors?style=flat-square)](https://github.com/piklz/pi_ups_monitors/issues)
+![X728 Logo](https://img.shields.io/badge/X728-UPS_Monitor-blue?style=flat-square&logo=raspberry-pi)
+![Docker](https://img.shields.io/badge/docker-ready-blue?style=flat-square&logo=docker)
 
 ## [Support me! ☕](https://buymeacoffee.com/pixelpiklz)
 
