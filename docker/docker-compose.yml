@@ -37,4 +37,4 @@ services:
       - /dev/i2c-1:/dev/i2c-1
     restart: unless-stopped
     pid: host
-    command: ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gevent", "--timeout", "120", "presto_x728:app"]
+    command: ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gevent", "--timeout", "120", "presto_x728_sysmon:app"]
