@@ -10,7 +10,7 @@
 ![Python](https://img.shields.io/badge/python-3.6+-yellow?style=for-the-badge&logo=python)
 ![Docker](https://img.shields.io/badge/docker-ready-blue?style=for-the-badge&logo=docker)
 
-**Professional Battery Monitoring & Management for Raspberry Pi**
+**Professional Battery Monitoring & Management Server for Raspberry Pi**
 
 [Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [Configuration](#-configuration) • [Troubleshooting](#-troubleshooting)
 
