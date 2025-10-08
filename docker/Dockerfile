@@ -3,6 +3,7 @@ FROM python:3.11-slim-bookworm
 RUN apt-get update && apt-get install -y \
     build-essential \
     python3-dev \
+    libffi-dev \
     libgpiod2 \
     python3-libgpiod \
     i2c-tools \
