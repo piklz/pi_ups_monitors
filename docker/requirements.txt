@@ -1,0 +1,29 @@
+# Library for SMBus access, used for I2C communication
+smbus2>=0.5.0
+
+# Web framework for building REST APIs
+Flask>=3.0.0
+
+# Extension for Flask to enable WebSocket communication
+Flask-SocketIO>=5.3.6
+
+# Python implementation of the Socket.IO protocol
+python-socketio>=5.11.0
+
+# Python implementation of the Engine.IO protocol (used by Socket.IO)
+python-engineio>=4.9.1
+
+# Coroutine-based Python networking library
+gevent>=24.2.1
+
+# WebSocket support for gevent
+gevent-websocket>=0.10.1
+
+# HTTP library for making API requests
+requests>=2.31.0
+
+# Cross-platform library for system monitoring (CPU, memory, etc.)
+psutil>=5.9.8
+
+# Python WSGI HTTP server for running Flask applications in production
+gunicorn==22.0.0
