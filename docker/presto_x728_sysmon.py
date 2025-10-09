@@ -18,10 +18,12 @@ GitHub Repository: https://github.com/piklz/pi_ups_monitors
 ===============================================================================
 
 DESCRIPTION:
-x728 HW v1.2 HAT Battery Monitor for raspberry pi 3,4,5
+x728 HW v1.2 HAT Battery Monitor for raspberry pi 3,4,5 (Docker Edition)
 This script provides comprehensive monitoring and control for the X728 UPS 
 HAT for Raspberry Pi. It includes features such as battery monitoring (and safe shutdown of Pi+x728), 
 power state detection, GPIO handling, and a modern web-based dashboard.
+ie.normal python scripts available for non docker setups /simple service 
+   or live checking setups in /piklz/pi_ups_monitors root folder
 
 FEATURES:
 - Real-time battery level and voltage monitoring
