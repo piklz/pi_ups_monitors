@@ -10,6 +10,8 @@
 ![Python](https://img.shields.io/badge/python-3.6+-yellow?style=for-the-badge&logo=python)
 ![Docker](https://img.shields.io/badge/docker-ready-blue?style=for-the-badge&logo=docker)
 
+[![Docker Image CI - Release Only](https://github.com/piklz/pi_ups_monitors/actions/workflows/docker-image.yml/badge.svg)](https://github.com/piklz/pi_ups_monitors/actions/workflows/docker-image.yml)
+
 **Professional Battery Monitoring & Management Server for Raspberry Pi**
 
 [Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [Configuration](#-configuration) • [Troubleshooting](#-troubleshooting)
