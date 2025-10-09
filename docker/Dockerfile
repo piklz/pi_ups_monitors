@@ -1,42 +1,28 @@
-# Build multi-stage 
-FROM python:3.11-slim-bookworm AS builder
-
-# Install build dependencies
+FROM python:3.11-slim-bookworm
+#for github actionsv3 builds(ubuntu), needed this libffi-dev to work the rest worked on pi directly when building(pi os/pythonslimbookworm)
 RUN apt-get update && apt-get install -y \
     build-essential \
     python3-dev \
     libffi-dev \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -U pip && \
-    pip uninstall -y gpiod || true && \
-    pip install --no-cache-dir --force-reinstall --user -r requirements.txt
-
-# Runtime stage
-FROM python:3.11-slim-bookworm
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
     libgpiod2 \
     python3-libgpiod \
     i2c-tools \
     sudo \
     tzdata \
     util-linux \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python dependencies from build stage
-COPY --from=builder /root/.local /root/.local
+COPY requirements.txt .
+RUN pip install --no-cache-dir -U pip && \
+    pip uninstall -y gpiod || true && \
+    pip install --no-cache-dir --force-reinstall -r requirements.txt
 
-# Set up application
 WORKDIR /app
 COPY presto_x728_sysmon.py .
 RUN mkdir -p /config
 
-# Create user and add to gpio, i2c, disk groups (unchanged)
+# Create user and add to gpio and i2c groups (use host GID for gpio, e.g., 997)
 RUN addgroup --gid 993 gpio && \
     getent group i2c || addgroup --gid 994 i2c && \
     getent group disk || addgroup --gid 6 disk && \
@@ -44,21 +30,14 @@ RUN addgroup --gid 993 gpio && \
     usermod -a -G i2c appuser && \
     chown -R appuser:gpio /app /config
 
-# Set up sudoers for appuser (unchanged)
 RUN echo "appuser ALL=(ALL) NOPASSWD: /sbin/shutdown, /sbin/reboot" > /etc/sudoers.d/appuser && \
     chmod 0440 /etc/sudoers.d/appuser
 
-# Environment variables (unchanged)
-ENV PATH="/usr/local/bin:/root/.local/bin:$PATH"
+ENV PATH="/usr/local/bin:$PATH"
 ENV PYTHONPATH="/usr/local/lib/python3.11/site-packages:/usr/lib/python3/dist-packages"
 
 EXPOSE 5000
-
-# Healthcheck (unchanged)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:5000', timeout=5)" || exit 1
-
-# Default to appuser (overridden by docker-compose.yml user: "0:0")
 USER 1000:993
-
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gevent", "--timeout", "120", "presto_x728_sysmon:app"]
