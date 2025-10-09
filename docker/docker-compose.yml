@@ -21,14 +21,10 @@ services:
       - NET_BIND_SERVICE
       - ALL
     volumes:
-      - /dev:/dev
-      #- /run/systemd:/run/systemd
+      - /dev:/dev    
       - /sys:/sys:ro
       - /sys/class/thermal/thermal_zone0/temp:/sys/class/thermal/thermal_zone0/temp:ro
       - /proc/uptime:/proc/uptime
-      #- /sbin:/sbin  # Mount host's shutdown binary
-      #- /usr/sbin:/usr/sbin  # Mount for DietPi/RetroPie compatibility
-      #- /bin:/bin  # For RetroPie/edge cases
       - /:/host:ro
       - ./volumes/presto_x728/config:/config
     devices:
