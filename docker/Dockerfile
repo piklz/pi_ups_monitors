@@ -1,5 +1,5 @@
 FROM python:3.11-slim-bookworm
-
+#for github actionsv3 builds(ubuntu), needed this libffi-dev to work the rest worked on pi directly when building(pi os/pythonslimbookworm)
 RUN apt-get update && apt-get install -y \
     build-essential \
     python3-dev \
