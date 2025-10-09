@@ -1,42 +1,43 @@
-name: Docker Image CI - Release Only
+name: Docker Image CI - Native ARM64 Only
 
 on:
-  # 🛠️ 1. Trigger ONLY when a new Release is published on GitHub
   release:
     types: [published]
 
 jobs:
   build_and_publish:
-    runs-on: ubuntu-latest
+    # 🛠️ New: Use the native ARM64 runner directly
+    runs-on: ubuntu-22.04-arm64
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
+    # ❌ QEMU is removed because the runner is native ARM64 YAY !
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-
+      
     - name: Log in to Docker Hub
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
         
-    # 🛠️ 2. Define the three required tags: Release, Immutable (Version-gSHA), and Latest
     - name: Define image tags
       id: vars
       run: |
-        # GITHUB_REF_NAME contains the release tag (e.g., v1.2.3)
-        VERSION_TAG=${GITHUB_REF_NAME}
+        # GITHUB_REF_NAME is the full tag (e.g., image/v1.2.3)
+        FULL_TAG=${GITHUB_REF_NAME}
+        
+        # Strip the 'image/' prefix for the clean Docker tag (e.g., v1.2.3)
+        VERSION_TAG=$(echo $FULL_TAG | sed 's/image\///')
         
         # Get the short commit SHA (e.g., 2f6c9d0)
         SHORT_SHA=$(git rev-parse --short HEAD)
         
         REPO_NAME="piklz/presto_x728"
         
-        # Define the tags:
+        # Define the three tags using the cleaned-up VERSION_TAG
         # 1. Human Tag: piklz/presto_x728:v1.2.3
         # 2. Immutable Tag: piklz/presto_x728:v1.2.3-g2f6c9d0
         # 3. Latest Tag: piklz/presto_x728:latest
@@ -49,6 +50,6 @@ jobs:
       with:
         push: true 
         context: ./docker 
-        # 🛠️ 3. Push all three tags simultaneously
+        # 🛠️ Only target the ARM64 platform
+        platforms: linux/arm64 
         tags: ${{ steps.vars.outputs.DOCKER_TAGS }}
-        platforms: linux/arm64,linux/arm/v7
