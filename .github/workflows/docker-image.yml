@@ -53,3 +53,4 @@ jobs:
         # 🛠️ Only target the ARM64 platform
         platforms: linux/arm64 
         tags: ${{ steps.vars.outputs.DOCKER_TAGS }}
+        no-cache: true  # 🛠️ Added to force rebuild and bypass cache
