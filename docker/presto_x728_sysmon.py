@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.0.2
+Version: 3.0.3
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,6 +37,7 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.0.3: Improved Docker compatibility and fixed minor bugs
 - v3.0.2: Fixed low battery checkign logic + improved logging
 - v3.0.1: flash status fixed for config save section + est time remaining for ntfy low battery alert  added
 - v3.0.0: Added professional UI, enhanced GPIO handling, and Docker compatibility
@@ -83,7 +84,7 @@ import psutil
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
 
-VERSION_STRING = "X728 UPS Monitor v3.0.2"
+VERSION_STRING = "X728 UPS Monitor v3.0.3"
 VERSION_BUILD = "Professional Docker Edition"
 
 app = Flask(__name__)
