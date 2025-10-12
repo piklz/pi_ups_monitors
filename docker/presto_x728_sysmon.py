@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.0.3
+Version: 3.0.5
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,13 +37,11 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.0.5: added intital config file with defaults created if 
+          none from previous runs exist,tweaked default thresholds.
 - v3.0.3: Improved Docker compatibility and fixed minor bugs
 - v3.0.2: Fixed low battery checkign logic + improved logging
-- v3.0.1: flash status fixed for config save section + est time remaining for ntfy low battery alert  added
-- v3.0.0: Added professional UI, enhanced GPIO handling, and Docker compatibility
-- v2.5.0: Introduced ntfy notifications and improved error handling
-- v2.0.0: Added web-based dashboard and historical data tracking
-- v1.0.0: Initial release with basic battery monitoring and shutdown
+
 
 USAGE TIPS:
 1. Ensure the X728 UPS HAT is properly connected to your Raspberry Pi.
@@ -84,7 +82,7 @@ import psutil
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
 
-VERSION_STRING = "X728 UPS Monitor v3.0.3"
+VERSION_STRING = "X728 UPS Monitor v3.0.5"
 VERSION_BUILD = "Professional Docker Edition"
 
 app = Flask(__name__)
@@ -110,9 +108,9 @@ HISTORY_PATH = "/config/battery_history.json"
 GPIO_PLD_PIN = 6   # Power Loss Detection
 GPIO_SHUTDOWN_PIN = 13 # Shutdown signal to UPS pi only
 DEFAULT_CONFIG = {
-    "low_battery_threshold": 30.0,
-    "critical_low_threshold": 10.0,
-    "cpu_temp_threshold": 70.0,
+    "low_battery_threshold": 10.0,
+    "critical_low_threshold": 2.0,
+    "cpu_temp_threshold": 65.0,
     "disk_space_threshold": 10.0,
     "enable_ntfy": 1,
     "ntfy_server": "https://ntfy.sh",
@@ -121,7 +119,7 @@ DEFAULT_CONFIG = {
     "monitor_interval": 10,
     "enable_auto_shutdown": 1,
     "shutdown_delay": 60,
-    "idle_load_ma": 500  # Idle current draw in mA for time estimation 500-800mA typical
+    "idle_load_ma": 750  # Idle current draw in mA for time estimation 500-800mA typical
 }
 
 # Global state
@@ -163,6 +161,38 @@ DISK_PATH = '/' if not os.path.exists('/.dockerenv') else '/host'
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
+
+
+
+def initialize_files():
+    """Create config and history files with defaults if they don't exist."""
+    try:
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        
+        # Initialize config if missing
+        if not os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, 'w') as f:
+                json.dump(DEFAULT_CONFIG, f, indent=4)
+            log_message("Initialized default configuration file on first run.")
+        
+        # Initialize battery history if missing (assuming it's a list from the code)
+        if not os.path.exists(HISTORY_PATH):
+            with open(HISTORY_PATH, 'w') as f:
+                json.dump([], f, indent=4)
+            log_message("Initialized empty battery history file on first run.")
+        
+        # Optional: Set permissions (match Dockerfile's chown for appuser:gpio)
+        os.chmod(CONFIG_PATH, 0o775)
+        os.chmod(HISTORY_PATH, 0o775)
+        # If running as root (per docker-compose user: "0:0"), chown to appuser (UID 1000, GID 993)
+        import pwd, grp
+        uid = 1000  # appuser UID
+        gid = 993   # gpio GID
+        os.chown(CONFIG_PATH, uid, gid)
+        os.chown(HISTORY_PATH, uid, gid)
+        
+    except Exception as e:
+        log_message(f"Failed to initialize files: {e}", "ERROR")
 
 def log_message(message, level="INFO"):
     """Enhanced logging with levels"""
@@ -1141,7 +1171,9 @@ def emit_flash(category, message):
 # GUNICORN/MODULE INITIALIZATION (MUST BE IN GLOBAL SCOPE)
 # ============================================================================
 
-# 1. Load configuration and history (Needs to run before hardware init/monitor thread)
+# 1. Create config if not already existing ,Load configuration and history (Needs to run before hardware init/monitor thread)
+
+initialize_files()
 load_config()
 load_battery_history()
 
