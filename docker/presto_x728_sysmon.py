@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.0.6
+Version: 3.0.7
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,6 +37,7 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.0.7: Tweaked colours and buttons in html/css config section
 - v3.0.6: minor addition of wifi name to system_info
 - v3.0.5: added intital config file with defaults created if 
           none from previous runs exist,tweaked default thresholds.
@@ -86,7 +87,7 @@ import psutil
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
 
-VERSION_STRING = "X728 UPS Monitor v3.0.6"
+VERSION_STRING = "X728 UPS Monitor v3.0.7"
 VERSION_BUILD = "Professional Docker Edition"
 
 app = Flask(__name__)
