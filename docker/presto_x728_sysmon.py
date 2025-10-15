@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.0.5
+Version: 3.0.6
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,6 +37,7 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.0.6: minor addition of wifi name to system_info
 - v3.0.5: added intital config file with defaults created if 
           none from previous runs exist,tweaked default thresholds.
 - v3.0.3: Improved Docker compatibility and fixed minor bugs
@@ -60,6 +61,9 @@ For more information, visit the GitHub repository:
 https://github.com/piklz/pi_ups_monitors
 ===============================================================================
 """
+# ============================================================================
+# IMPORTS
+# ============================================================================
 
 import socket
 import os
@@ -82,7 +86,7 @@ import psutil
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
 
-VERSION_STRING = "X728 UPS Monitor v3.0.5"
+VERSION_STRING = "X728 UPS Monitor v3.0.6"
 VERSION_BUILD = "Professional Docker Edition"
 
 app = Flask(__name__)
@@ -163,7 +167,24 @@ DISK_PATH = '/' if not os.path.exists('/.dockerenv') else '/host'
 # ============================================================================
 
 
-
+def get_network_info():
+    """Get network connection info: WiFi SSID if available, else fallback to Ethernet or suitable name."""
+    try:
+        # Attempt to get WiFi SSID using iwgetid -r (returns SSID if connected)
+        ssid = subprocess.check_output(['iwgetid', '-r']).decode('utf-8').strip()
+        if ssid:
+            return f"WiFi: {ssid}"
+        else:
+            # Fallback if no WiFi SSID (e.g., on Ethernet)
+            return "Ethernet"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # If iwgetid not available or fails, fallback to a generic name
+        return "Wired Connection"
+    except Exception as e:
+        log_message(f"Network info error: {e}", "WARNING")
+        return "Unknown"
+        
+        
 def initialize_files():
     """Create config and history files with defaults if they don't exist."""
     try:
@@ -697,7 +718,8 @@ def get_system_info():
         "disk_free": f"{disk_free_gb:.1f}",
         "disk_label": disk_label,
         "memory_info": memory_info,  # New: "free / total" in GB
-        "uptime": uptime_str
+        "uptime": uptime_str,
+        "network": get_network_info()
     }
 
 def get_pi_model():
@@ -1166,7 +1188,6 @@ def emit_flash(category, message):
 
 
 
-
 # ============================================================================
 # GUNICORN/MODULE INITIALIZATION (MUST BE IN GLOBAL SCOPE)
 # ============================================================================
@@ -1227,57 +1248,89 @@ DASHBOARD_TEMPLATE = '''
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
         }
-        
+
         html.dark body {
             background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
         }
-        
+
         .glass-card {
             background: rgba(255, 255, 255, 0.9);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         }
-        
+
         html.dark .glass-card {
             background: rgba(30, 41, 59, 0.8);
             border: 1px solid rgba(51, 65, 85, 0.3);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
         }
-        /* --- LIGHT MODE FIX: Comprehensive Override --- */
-        /* --- START OF LIGHT MODE FIX: FINAL COMPREHENSIVE OVERRIDE --- */
-        
-        /* 1. Target generic dark mode background/text classes used in inner divs */
-        html:not(.dark) .dark\:bg-gray-800,
-        html:not(.dark) .dark\:bg-gray-900,
-        html:not(.dark) .dark\:text-white {
-            background-color: #F3F4F6 !important; /* Light Grey Background */
-            color: #1F2937 !important; /* Dark Text Color */
-        }
-        
-        /* 2. Target the main card and configuration elements */
-        html:not(.dark) .glass-card,
-        html:not(.dark) .collapsible-content,
-        html:not(.dark) .collapsible-content > *,
-        html:not(.dark) #config-container {
-            background-color: #FFFFFF !important; /* Force all containers to white */
-            color: #1F2937 !important;
-            border-color: #d1d5db !important; /* Light border */
-        }
 
-        /* 3. FIX FOR INPUT FIELDS (low_battery_threshold etc.) */
-        /* Target the specific dark background class found on inputs/textareas */
-        html:not(.dark) .dark\:bg-gray-700 {
-            background-color: #FFFFFF !important; /* White background for input fields */
-            color: #1F2937 !important; /* Dark text in input fields */
-        }
-
-        /* --- END OF LIGHT MODE FIX --- */
         .metric-card {
             position: relative;
             overflow: hidden;
+            background: #FFFFFF; /* Assumed white background for light mode */
         }
-        
+
+        html.dark .metric-card {
+            background: #1E293B; /* slate-800 for dark mode */
+        }
+
+        /* Robust Light and Dark Mode Text Overrides */
+        .glass-card h3,
+        .glass-card label,
+        .glass-card input,
+        .glass-card textarea,
+        .metric-card h2,
+        .metric-card h3,
+        .metric-card p,
+        .metric-card span {
+            color: #111827; /* gray-900 for headers, small texts, and inputs in light mode */
+        }
+
+        html.dark .glass-card h3,
+        html.dark .glass-card label,
+        html.dark .glass-card input,
+        html.dark .glass-card textarea,
+        html.dark .metric-card h2,
+        html.dark .metric-card h3, 
+        html.dark .metric-card p,
+        html.dark .metric-card span {
+            color: #9ca3af; /* #F3F4F6 gray-100 for headers, small texts, and inputs in dark mode */
+        }
+
+        /* Ensure input fields have consistent backgrounds */
+        .glass-card input,
+        .glass-card textarea {
+            background-color: #FFFFFF; /* White background for inputs in light mode */
+            border-color: #D1D5DB; /* gray-300 border */
+        }
+
+        html.dark .glass-card input,
+        html.dark .glass-card textarea {
+            background-color: #1E293B; /* slate-800 background for inputs in dark mode */
+            border-color: #475569; /* slate-600 border */
+        }
+
+        /* Override Tailwind dark mode classes to prevent conflicts */
+        html:not(.dark) .glass-card .dark\:bg-gray-700,
+        html:not(.dark) .glass-card .dark\:bg-gray-800,
+        html:not(.dark) .glass-card .dark\:bg-gray-900,
+        html:not(.dark) .metric-card .dark\:bg-gray-700,
+        html:not(.dark) .metric-card .dark\:bg-gray-800,
+        html:not(.dark) .metric-card .dark\:bg-gray-900 {
+            background-color: #FFFFFF !important; /* White background for inputs and metric cards in light mode */
+        }
+
+        html:not(.dark) .glass-card .dark\:text-gray-100,
+        html:not(.dark) .glass-card .dark\:text-gray-200,
+        html:not(.dark) .glass-card .dark\:text-white,
+        html:not(.dark) .metric-card .dark\:text-gray-100,
+        html:not(.dark) .metric-card .dark\:text-gray-200,
+        html:not(.dark) .metric-card .dark\:text-white {
+            color: #111827 !important; /* gray-900 for text in light mode */
+        }
+
         .metric-card::before {
             content: '';
             position: absolute;
@@ -1421,9 +1474,9 @@ DASHBOARD_TEMPLATE = '''
                     </div>
                     <div class="flex items-center gap-4">
                         <div class="text-right">
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Version</p>
-                            <p class="text-sm font-semibold text-gray-700 dark:text-gray-300">{{ VERSION_STRING }}</p>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">{{ VERSION_BUILD }}</p>
+                            <p class="text-xs text-gray-900 dark:text-gray-400">Version</p>
+                            <p class="text-sm font-semibold text-gray-800 dark:text-gray-300">{{ VERSION_STRING }}</p>
+                            <p class="text-xs text-gray-800 dark:text-gray-400">{{ VERSION_BUILD }}</p>
                         </div>
                         <button onclick="toggleDarkMode()" class="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
                             <svg id="darkModeIcon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1473,7 +1526,7 @@ DASHBOARD_TEMPLATE = '''
                 <div class="glass-card metric-card rounded-2xl p-6">
                     <div class="flex justify-between items-start mb-4">
                         <div>
-                            <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">Power State</p>
+                            <p class="text-sm slate-900 dark:text-gray-400 mb-1">Power State</p>
                             <div id="power-state-badge" class="status-badge mt-2 {% if power_state == 'On AC Power' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% elif power_state == 'On Battery' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200{% else %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% endif %}">
                                 <div class="status-pulse {% if power_state == 'On AC Power' %}bg-green-500{% elif power_state == 'On Battery' %}bg-yellow-500{% else %}bg-red-500{% endif %}"></div>
                                 <span id="power-state">{{ power_state }}</span>
@@ -1505,7 +1558,7 @@ DASHBOARD_TEMPLATE = '''
                         </div>
                     </div>
                     <div class="text-sm space-y-1">
-                        <p class="text-gray-600 dark:text-gray-400">🌡️ CPU: <span id="cpu-temp" class="font-semibold">{{ system_info.cpu_temp }}°C</span></p>
+                        <p class="text-gray-600 dark:text-gray-400">🌡️ CPU: <span id="cpu-temp" class="font-semibold">{{ system_info.cpu_temp }}°C </span> 🛜<span id="network" class="font-semibold"> {{ system_info.network | default('Unknown') }}</span></p>
                         <p class="text-gray-600 dark:text-gray-400">💾 Disk (<span id="disk-label">{{ system_info.disk_label }}</span>): <span id="disk-usage" class="font-semibold">{{ system_info.disk_usage }}%</span> used (<span id="disk-free" class="font-semibold">{{ system_info.disk_free }}</span> GB free)</p>
                         <p class="text-gray-600 dark:text-gray-400">🧠 RAM: <span id="memory-info" class="font-semibold">{{ system_info.memory_info }}</span></p>
                     </div>
@@ -1517,7 +1570,7 @@ DASHBOARD_TEMPLATE = '''
                 
                 <!-- Battery History Chart -->
                 <div class="glass-card rounded-2xl p-6">
-                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
+                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-100 dark:text-gray-400">
                         <svg class="w-6 h-6 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
                             <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"></path>
                         </svg>
@@ -1530,7 +1583,7 @@ DASHBOARD_TEMPLATE = '''
                 
                 <!-- Hardware Status -->
                 <div class="glass-card rounded-2xl p-6">
-                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2">
+                    <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-900 dark:text-gray-400">
                         <svg class="w-6 h-6 text-purple-500" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M3 3a1 1 0 000 2v8a2 2 0 002 2h2.586l-1.293 1.293a1 1 0 101.414 1.414L10 15.414l2.293 2.293a1 1 0 001.414-1.414L12.414 15H15a2 2 0 002-2V5a1 1 0 100-2H3zm11.707 4.707a1 1 0 00-1.414-1.414L10 9.586 8.707 8.293a1 1 0 00-1.414 0l-2 2a1 1 0 101.414 1.414L8 10.414l1.293 1.293a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                         </svg>
@@ -1538,23 +1591,23 @@ DASHBOARD_TEMPLATE = '''
                     </h3>
                     <div class="space-y-4">
                         <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                            <span class="font-semibold">I2C Bus</span>
+                            <span class="font-semibold text-gray-900 dark:text-gray-400">I2C Bus</span>
                             <span id="i2c-status" class="{% if not hardware_error %}text-green-500{% else %}text-red-500{% endif %}">
                                 {% if not hardware_error %}✅ {{ i2c_addr }}{% else %}❌ Error{% endif %}
                             </span>
                         </div>
                         <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                            <span class="font-semibold">GPIO Interface</span>
+                            <span class="font-semibold text-gray-900 dark:text-gray-400">GPIO Interface</span>
                             <span id="gpio-status" class="{% if not gpio_error %}text-green-500{% else %}text-yellow-500{% endif %}">
                                 {% if not gpio_error %}✅ Active{% else %}⚠️ Limited{% endif %}
                             </span>
                         </div>
                         <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                            <span class="font-semibold">Uptime</span>
+                            <span class="font-semibold text-gray-900 dark:text-gray-400 ">Uptime</span>
                             <span id="uptime" class="text-blue-500 font-mono">{{ system_info.uptime }}</span>
                         </div>
                         <div class="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                            <span class="font-semibold">Last Update</span>
+                            <span class="font-semibold text-gray-900 dark:text-gray-400">Last Update</span>
                             <span id="last-update" class="text-gray-500 text-sm">{{ timestamp }}</span>
                         </div>
                     </div>
@@ -1566,13 +1619,13 @@ DASHBOARD_TEMPLATE = '''
                 <!-- Configuration Section -->
                 <div class="glass-card rounded-2xl p-6">
                     <button onclick="toggleSection('config')" class="w-full flex justify-between items-center">
-                        <h3 class="text-xl font-bold flex items-center gap-2">
+                        <h3 class="text-xl font-bold flex items-center gap-2 text-gray-900 dark:text-gray-400">
                             <svg class="w-6 h-6 text-indigo-500" fill="currentColor" viewBox="0 0 20 20">
                                 <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path>
                             </svg>
                             Configuration
                         </h3>
-                        <svg id="config-arrow" class="w-6 h-6 transform transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                        <svg id="config-arrow" class="w-6 h-6 transform transition-transform text-gray-900 dark:text-gray-200" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"></path>
                         </svg>
                     </button>
@@ -1582,7 +1635,7 @@ DASHBOARD_TEMPLATE = '''
                             
                             <!-- Battery Thresholds -->
                             <div class="space-y-4">
-                                <h4 class="font-semibold text-lg border-b pb-2">Battery Thresholds</h4>
+                                <h4 class="font-semibold text-lg border-b pb-2 text-gray-900 dark:text-gray-200">Battery Thresholds</h4>
                                 
                                 <div>
                                     <label class="block text-sm font-medium mb-2">Low Battery Warning (%)</label>
@@ -1601,7 +1654,7 @@ DASHBOARD_TEMPLATE = '''
                             
                             <!-- System Thresholds -->
                             <div class="space-y-4">
-                                <h4 class="font-semibold text-lg border-b pb-2">System Thresholds</h4>
+                                <h4 class="font-semibold text-lg border-b pb-2 text-gray-900 dark:text-gray-200">System Thresholds</h4>
                                 
                                 <div>
                                     <label class="block text-sm font-medium mb-2">CPU Temperature (°C)</label>
@@ -1620,7 +1673,7 @@ DASHBOARD_TEMPLATE = '''
                             
                             <!-- Monitoring Settings -->
                             <div class="space-y-4">
-                                <h4 class="font-semibold text-lg border-b pb-2">Monitoring Settings</h4>
+                                <h4 class="font-semibold text-lg border-b pb-2 text-gray-900 dark:text-gray-200">Monitoring Settings</h4>
                                 
                                 <div>
                                     <label class="block text-sm font-medium mb-2">Update Interval (seconds) on AC </label>
@@ -1637,32 +1690,44 @@ DASHBOARD_TEMPLATE = '''
                                 </div>
                                 
                                 <div class="flex items-center gap-3">
-                                    <input type="checkbox" name="enable_auto_shutdown" value="1" 
-                                        {% if config.enable_auto_shutdown %}checked{% endif %}
-                                        class="w-5 h-5 text-blue-600 rounded">
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" name="enable_auto_shutdown" value="1" 
+                                            {{ 'checked' if config.enable_auto_shutdown else '' }} 
+                                            class="sr-only peer">
+                                        <div class="w-14 h-7 bg-gray-200 peer-checked:bg-gradient-to-r peer-checked:from-red-400 peer-checked:to-red-600 rounded-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-red-300 dark:peer-focus:ring-red-800 transition-all duration-300"></div>
+                                        <span class="absolute w-5 h-5 bg-white rounded-full top-1 left-1 peer-checked:translate-x-7 transition-transform duration-300"></span>
+                                    </label>
                                     <label class="font-medium">Enable Auto-Shutdown</label>
                                 </div>
                                 <div class="flex items-center gap-3">
-                                    <input type="checkbox" name="debug" value="1" 
-                                        {% if config.debug %}checked{% endif %}
-                                        class="w-5 h-5 text-blue-600 rounded">
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" name="debug" value="1" 
+                                            {{ 'checked' if config.debug else '' }} 
+                                            class="sr-only peer">
+                                        <div class="w-14 h-7 bg-gray-200 peer-checked:bg-gradient-to-r peer-checked:from-blue-400 peer-checked:to-blue-600 rounded-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 transition-all duration-300"></div>
+                                        <span class="absolute w-5 h-5 bg-white rounded-full top-1 left-1 peer-checked:translate-x-7 transition-transform duration-300"></span>
+                                    </label>
                                     <label class="font-medium">Enable Debug Logging</label>
-                                </div>                               
+                                </div>
                             </div>
                             
                             <!-- Notification Settings -->
                             <div class="space-y-4">
-                                <h4 class="font-semibold text-lg border-b pb-2">Notifications (ntfy)</h4>
+                                <h4 class="font-semibold text-lg border-b pb-2 text-gray-900 dark:text-gray-200">Notifications (ntfy)</h4>
                                 
                                 <div class="flex items-center gap-3">
-                                    <input type="checkbox" name="enable_ntfy" value="1" 
-                                        {% if config.enable_ntfy %}checked{% endif %}
-                                        class="w-5 h-5 text-blue-600 rounded">
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" name="enable_ntfy" value="1" 
+                                            {{ 'checked' if config.enable_ntfy else '' }} 
+                                            class="sr-only peer">
+                                        <div class="w-14 h-7 bg-gray-200 peer-checked:bg-gradient-to-r peer-checked:from-green-400 peer-checked:to-green-600 rounded-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-green-300 dark:peer-focus:ring-green-800 transition-all duration-300"></div>
+                                        <span class="absolute w-5 h-5 bg-white rounded-full top-1 left-1 peer-checked:translate-x-7 transition-transform duration-300"></span>
+                                    </label>
                                     <label class="font-medium">Enable ntfy Notifications</label>
                                 </div>
                                 
                                 <div>
-                                    <label class="block class="block text-sm font-medium mb-2">ntfy Server</label>
+                                    <label class="block text-sm font-medium mb-2">ntfy Server</label>
                                     <input type="text" name="ntfy_server" 
                                         value="{{ config.ntfy_server }}"
                                         placeholder="https://ntfy.sh"
@@ -1685,7 +1750,6 @@ DASHBOARD_TEMPLATE = '''
                                 </button>
                             </div>
                         </form>
-                        
                         
                     </div>
                 </div>
@@ -1881,6 +1945,7 @@ DASHBOARD_TEMPLATE = '''
             
             // System info
             document.getElementById('cpu-temp').textContent = data.system_info.cpu_temp + '°C';
+            document.getElementById('network').textContent = ' ' + data.system_info.network;
             document.getElementById('disk-label').textContent = data.system_info.disk_label;
             document.getElementById('disk-usage').textContent = data.system_info.disk_usage + '%';
             document.getElementById('disk-free').textContent = data.system_info.disk_free;
