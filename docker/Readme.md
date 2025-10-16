@@ -6,11 +6,11 @@
 <div align="center">
 
 ![X728 Logo](https://img.shields.io/badge/X728-UPS_Monitor-blue?style=for-the-badge&logo=raspberry-pi)
-![Version](https://img.shields.io/badge/version-3.0.2-green?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-3.0.9-green?style=for-the-badge)
 ![Python](https://img.shields.io/badge/python-3.6+-yellow?style=for-the-badge&logo=python)
 ![Docker](https://img.shields.io/badge/docker-ready-blue?style=for-the-badge&logo=docker)
 
-[![Docker Image CI - Release Only](https://github.com/piklz/pi_ups_monitors/actions/workflows/docker-image.yml/badge.svg)](https://github.com/piklz/pi_ups_monitors/actions/workflows/docker-image.yml)
+[![Docker Image CI - Native ARM64 Only](https://github.com/piklz/pi_ups_monitors/actions/workflows/docker-image.yml/badge.svg)](https://github.com/piklz/pi_ups_monitors/actions/workflows/docker-image.yml)
 
 **Professional Battery Monitoring & Management Server for Raspberry Pi**
 
