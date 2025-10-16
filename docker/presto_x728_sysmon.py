@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.0.8
+Version: 3.0.9
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,13 +37,11 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.0.9: internet status mroe robust to handle container and host tests
 - v3.0.8: added wifi/ethernet status to system info
 - v3.0.7: Tweaked colours and buttons in html/css config section
 - v3.0.6: minor addition of wifi name to system_info
-- v3.0.5: added intital config file with defaults created if 
-          none from previous runs exist,tweaked default thresholds.
-- v3.0.3: Improved Docker compatibility and fixed minor bugs
-- v3.0.2: Fixed low battery checkign logic + improved logging
+
 
 
 USAGE TIPS:
@@ -88,7 +86,7 @@ import psutil
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
 
-VERSION_STRING = "X728 UPS Monitor v3.0.8"
+VERSION_STRING = "X728 UPS Monitor v3.0.9"
 VERSION_BUILD = "Professional Docker Edition"
 
 app = Flask(__name__)
@@ -169,31 +167,68 @@ DISK_PATH = '/' if not os.path.exists('/.dockerenv') else '/host'
 # ============================================================================
 
 
-def get_network_info():
-    """Get network connection info: (display_text, status). Status is 'connected' or 'disconnected' based on public internet."""
-    try:
-        # Attempt to get WiFi SSID using iwgetid -r
-        ssid = subprocess.check_output(['iwgetid', '-r']).decode('utf-8').strip()
-        if ssid:
-            display_text = f"🛜WiFi: {ssid}"
-        else:
-            # Fallback if no WiFi SSID (e.g., on Ethernet)
-            display_text = "Ethernet"
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # If iwgetid not available or fails, fallback to a generic name
-        display_text = "Ethernet"
-    except Exception as e:
-        log_message(f"Network info error: {e}", "WARNING")
-        display_text = "Unknown"
 
+def get_network_info():
+    """
+    Get network connection info: (display_text, status). 
+    Status is 'connected' or 'disconnected' based on public internet.
+    Works robustly on host (DietPi/Ubuntu) and inside a container.
+    """
+    
+    display_text = "Unknown"
+    status = 'disconnected'
+    
+    
+    # Determine Execution Environment
+    
+    is_running_in_container = os.path.exists("/.dockerenv")
+
+    
+    # Determine Network Type (Device-dependent)
+    
+    if is_running_in_container:
+        # Inside Container: Cannot reliably detect Wi-Fi/Ethernet. 
+        # Assume generic 'Container Network' for display.
+        display_text = "Container Network"
+    else:
+        # On Host (DietPi, Ubuntu, RetroPie): Attempt physical device detection
+        try:
+            # Attempt to get WiFi SSID using iwgetid -r
+            # iwgetid should be available on most modern Linux hosts with Wi-Fi
+            ssid = subprocess.check_output(['iwgetid', '-r']).decode('utf-8').strip()
+            if ssid:
+                display_text = f"🛜WiFi: {ssid}"
+            else:
+                # If iwgetid runs but returns no SSID (often Ethernet)
+                display_text = "Ethernet"
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # iwgetid not installed or fails (e.g., on a headless Ethernet-only machine)
+            display_text = "Ethernet"
+        except Exception as e:
+            # log_message(f"Network info error: {e}", "WARNING")
+            display_text = "Unknown Host"
+
+    
+    # Liveness Check (Public Internet) - run on both host and container
+    
     try:
-        # Check public internet connectivity with ping to Cloudflare (1.1.1.1)
-        subprocess.check_output(['ping', '-c', '1', '-W', '2', '1.1.1.1'])
+        # no ping no curl in image no problem! Attempt a pure Python socket connection to a reliable public IP on a common port.
+        host = '1.1.1.1' # Cloudflare DNS
+        port = 53
+        timeout = 2
+
+        s = socket.create_connection((host, port), timeout)
+        s.close()
+        
         status = 'connected'
-    except subprocess.CalledProcessError:
+    
+    except socket.error:
+        # Catch specific socket errors (timeout, refusal, OSError)
         status = 'disconnected'
+    
     except Exception as e:
-        log_message(f"Internet check error: {e}", "WARNING")
+        # Catch any other unexpected errors during the check
+        # log_message(f"Internet check error: {e}", "WARNING")
         status = 'disconnected'
 
     return display_text, status
