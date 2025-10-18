@@ -14,11 +14,40 @@
 
 **Professional Battery Monitoring & Management Server for Raspberry Pi**
 
-[Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [Configuration](#-configuration) • [Troubleshooting](#-troubleshooting)
+[Features](#-Features) • [Installation](#-installation) • [Usage](#-usage) • [Configuration](#-configuration) • [Troubleshooting](#-troubleshooting)
 
 </div>
 
 ---
+
+<br>
+
+💡TIP: Recommended use + whats needed to run this on host pi:
+###  USING WITH PRESTO {PRESTO_TOOLS}
+Run 'presto_launch' pick 'stack creator'menu option and load/create your compose app  list from there; to run presto_x728 app with your other chosen services ! or if you are only interested in testing it on its own read steps below: [QUICKSTART](#-Quick-Start) 
+
+#### 💡Required Before running/building Container/script:
+
+**i2c enabled** (raspi-config) + gpio overlay in pi ```/boot/firmware/config.txt``` (simple + works on dietpi,ubuntu,retropie etc)
+
+Enable Shudown overlay/i2c > place in config.txt:
+
+```dtoverlay=gpio-poweroff,gpiopin=13,active_low=0,timeout_ms=10000```
+
+**i2c ENABLE:**
+
+**dietpi** : ```sudo dietpi-config``` > ``display`` >```I2C state``` > ```ON```
+
+**ubuntu** : ```dtparam=i2c_arm=on```  same place as pi os in ```/boot/config.txt``` file (or ```/boot/firmware/config.txt``` on newer systems)
+
+Test its working :
+run: 
+```ls /dev/i2c-*```
+
+ Expected output: 
+ ```/dev/i2c-1  /dev/i2c-13  /dev/i2c-14```
+
+
 
 ## 📋 Overview
 
@@ -44,49 +73,52 @@ X728 UPS Monitor is a comprehensive monitoring solution for the X728 UPS HAT (v1
 - ✅ Raspberry Pi 3 (all models)
 - ✅ Raspberry Pi 4 (all models)
 - ✅ Raspberry Pi 5
-- ✅ X728 UPS HAT v1.2+
+- ✅ X728 UPS HAT v1.2/3+( I will eventually support the other versions, just need to get one to test)
 
-### Supported Operating Systems
-- 🍓 **Raspberry Pi OS** (Bullseye, Bookworm)
+### Supported Operating Systems(debians mainly)
+- 🍓 **Raspberry Pi OS** (Bullseye, Bookworm,Trixie)
 - 🥧 **DietPi**
 - 🎮 **RetroPie**
-- 🐧 **Ubuntu Server** (for Pi)
+- 🐧 **Ubuntu** (for Pi)
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start 
 
-### Option 1: Docker Compose (Recommended)
+
+### Option 1: Docker Run live demo (ctrl+c to exit/stop container )
 
 ```bash
-# Create directory
-mkdir -p ~/x728_monitor
-cd ~/x728_monitor
+docker run --rm -it \
+  --name presto_x728 \
+  --privileged \
+  --user  "0:0" \
+  -p 5000:5000  \
+  -v /:/host:ro  \
+  -v /sys:/sys \
+  -v /dev/gpiochip0:/dev/gpiochip0  \
+  -v ./volumes/presto_x728/config:/config  \
+  piklz/presto_x728
+```
 
-# Download docker-compose.yml
-wget https://raw.githubusercontent.com/piklz/pi_ups_monitors/main/docker/docker-compose.yml
+### Option 2: Docker Compose local (Recommended Single Daily Use - runs in background/survives reboots)
 
-# Start the service
+```bash
+# Create directory to contain our app
+mkdir -p ~/presto_x728
+cd ~/presto_x728
+
+# Download docker-compose_local.yml & 
+wget https://raw.githubusercontent.com/piklz/pi_ups_monitors/main/docker/docker-compose__local.yml
+# *rename to docker-compose.yml before running next command
+
+# Start the service (runs detached so its always running in the background continuously  )
 docker compose up -d
 ```
 
-### Option 2: Docker Run
 
-```bash
-docker run -d \
-  --name x728_monitor \
-  --privileged \
-  --restart unless-stopped \
-  -p 5000:5000 \
-  -v /config:/config \
-  -v /:/host:ro \
-  -v /sys:/sys \
-  -v /dev/gpiochip0:/dev/gpiochip0 \
-  -e TZ=America/New_York \
-  piklz/x728_monitor:latest
-```
 
-### Option 3: Direct Python Installation
+### Option 3: Direct Python Installation(to play with python script directly on host pi )
 
 ```bash
 # Install dependencies
@@ -111,10 +143,10 @@ sudo python3 x728_web.py
 ### 1️⃣ Enable I2C Interface
 
 <details>
-<summary>Click to expand I2C setup instructions</summary>
+<summary>Click to expand I2C setup instructions(pi os only)</summary>
 
 ```bash
-# Enable I2C
+# Enable I2C (pi os only)
 sudo raspi-config nonint do_i2c 0
 
 # Verify I2C is enabled
@@ -135,7 +167,7 @@ Expected output:
 
 </details>
 
-### 2️⃣ Configure Kernel Overlay (Critical!)
+### 2️⃣ Configure Kernel Overlay (Critical!)(locally-run python script mode)
 
 The script will **automatically** configure the kernel overlay on first run. However, you can verify manually:
 
@@ -153,7 +185,7 @@ grep "dtoverlay=gpio-poweroff" /boot/firmware/config.txt
 sudo reboot
 ```
 
-### 3️⃣ Docker Installation (If using Docker)
+### 3️⃣ Docker Installation (if using presto already you'll not need this step -skip!)
 
 ```bash
 # Install Docker

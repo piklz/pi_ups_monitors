@@ -1,13 +1,10 @@
 #---------------------------------------------------------------------#
-#     presto x728 UPS hat ui monitor tool (built locally image)       #
+#     presto x728 UPS hat ui monitor tool (using docker hub image)    #
 #---------------------------------------------------------------------#
 services:
   presto_x728:
-    image: presto_x728
+    image: piklz/presto_x728
     container_name: presto_x728
-    build:
-      context: .
-      dockerfile: Dockerfile
     ports:
       - "5000:5000"
     privileged: true
