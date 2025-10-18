@@ -24,7 +24,7 @@
 
 💡TIP: Recommended use + whats needed to run this on host pi:
 ###  USING WITH PRESTO {PRESTO_TOOLS}
-Run 'presto_launch' pick 'stack creator'menu option and load/create your compose app  list from there; to run presto_x728 app with your other chosen services ! or if you are only interested in testing it on its own read steps below: [QUICKSTART](#-Quick-Start) 
+Run 'presto_launch' pick 'Build Docker Stack' menu option and load/create your compose app  list from there; to run presto_x728 app with your other chosen services ! or if you are only interested in testing it on its own read steps below: [QUICKSTART](#-Quick-Start) 
 
 #### 💡Required Before running/building Container/script:
 
