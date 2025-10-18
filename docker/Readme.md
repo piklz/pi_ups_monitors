@@ -93,7 +93,7 @@ docker run --rm -it \
   --name presto_x728 \
   --privileged \
   --user  "0:0" \
-  -p 5000:5000  \
+  -p 7728:7728  \
   -v /:/host:ro  \
   -v /sys:/sys \
   -v /dev/gpiochip0:/dev/gpiochip0  \
@@ -208,12 +208,12 @@ sudo apt install -y docker-compose
 Once running, access the dashboard at:
 
 ```
-http://YOUR_PI_IP:5000
+http://YOUR_PI_IP:7728
 ```
 
 Example:
-- Local: `http://192.168.1.100:5000`
-- Hostname: `http://raspberrypi.local:5000`
+- Local: `http://192.168.1.100:7728`
+- Hostname: `http://raspberrypi.local:7728`
 
 ---
 
@@ -385,7 +385,7 @@ docker logs x728_monitor  # Docker
 journalctl -u x728_monitor -f  # systemd
 
 # Verify port is open
-sudo netstat -tulpn | grep 5000
+sudo netstat -tulpn | grep 7728
 ```
 
 ### Battery Not Charging
@@ -406,7 +406,7 @@ The container requires `--privileged` flag for:
 - Host filesystem access for safe shutdown
 
 ### Network Security
-- Dashboard runs on port 5000 (HTTP)
+- Dashboard runs on port 7728 (HTTP)
 - Consider using a reverse proxy (nginx, Caddy) for HTTPS
 - Restrict access with firewall rules if exposed to internet
 
@@ -419,10 +419,10 @@ The container requires `--privileged` flag for:
 ```bash
 # Change port in docker-compose.yml
 ports:
-  - "8080:5000"  # Host:Container
+  - "8080:7728"  # Host:Container
 
 # Or in docker run
-docker run -p 8080:5000 ...
+docker run -p 8080:7728 ...
 ```
 
 ### Persistent Data Location

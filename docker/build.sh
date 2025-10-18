@@ -171,8 +171,8 @@ show_info() {
     LOCAL_IP=$(hostname -I | awk '{print $1}')
     
     echo -e "\n${BLUE}Access the web interface at:${NC}"
-    echo -e "  ${GREEN}http://localhost:5000${NC}"
-    echo -e "  ${GREEN}http://${LOCAL_IP}:5000${NC}"
+    echo -e "  ${GREEN}http://localhost:7728${NC}"
+    echo -e "  ${GREEN}http://${LOCAL_IP}:7728${NC}"
     
     echo -e "\n${BLUE}Useful commands:${NC}"
     echo -e "  View logs:      ${YELLOW}docker logs -f ${CONTAINER_NAME}${NC}"
@@ -203,7 +203,7 @@ run_tests() {
     # Test web interface
     echo -e "${BLUE}Testing web interface...${NC}"
     sleep 2
-    if curl -s http://localhost:5000 > /dev/null; then
+    if curl -s http://localhost:7728 > /dev/null; then
         echo -e "${GREEN}✓ Web interface is accessible${NC}"
     else
         echo -e "${RED}✗ Web interface not accessible${NC}"

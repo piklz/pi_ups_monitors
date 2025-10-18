@@ -46,7 +46,7 @@ CHANGELOG:
 
 USAGE TIPS:
 1. Ensure the X728 UPS HAT is properly connected to your Raspberry Pi.
-2. Access the web dashboard at `http://<your-pi-ip>:5000` after starting the script.
+2. Access the web dashboard at `http://<your-pi-ip>:7728` after starting the script.
 3. Use the configuration section in the dashboard to customize thresholds and settings.
 
 IMPORTANT:
@@ -2292,12 +2292,12 @@ if __name__ == '__main__':
     print(f"Starting {VERSION_STRING} - {VERSION_BUILD}")
    # Start Flask application
     try:
-        log_message(f"Starting web server on port 5000...")
+        log_message(f"Starting web server on port 7728...")
         
         socketio.run(
             app, 
             host='0.0.0.0', 
-            port=5000, 
+            port=7728, 
             debug=False, 
             allow_unsafe_werkzeug=True
         )

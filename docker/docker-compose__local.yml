@@ -6,7 +6,7 @@ services:
     image: piklz/presto_x728
     container_name: presto_x728
     ports:
-      - "5000:5000"
+      - "7728:7728"
     privileged: true
     user: "0:0"  # Run as root for device access
     cap_add:
@@ -26,4 +26,4 @@ services:
       - /dev/i2c-1:/dev/i2c-1
     restart: unless-stopped
     pid: host
-    command: ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gevent", "--timeout", "120", "presto_x728_sysmon:app"]
+    command: ["gunicorn", "--bind", "0.0.0.0:7728", "--workers", "1", "--worker-class", "gevent", "--timeout", "120", "presto_x728_sysmon:app"]

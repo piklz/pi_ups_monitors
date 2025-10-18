@@ -52,13 +52,13 @@ RUN echo "appuser ALL=(ALL) NOPASSWD: /sbin/shutdown, /sbin/reboot" > /etc/sudoe
 ENV PATH="/usr/local/bin:/root/.local/bin:$PATH"
 ENV PYTHONPATH="/usr/local/lib/python3.11/site-packages:/usr/lib/python3/dist-packages"
 
-EXPOSE 5000
+EXPOSE 7728
 
 # Healthcheck (unchanged)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5000', timeout=5)" || exit 1
+    CMD python -c "import requests; requests.get('http://localhost:7728', timeout=5)" || exit 1
 
 # Default to appuser (overridden by docker-compose.yml user: "0:0")
 USER 1000:993
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--worker-class", "gevent", "--timeout", "120", "presto_x728_sysmon:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:7728", "--workers", "1", "--worker-class", "gevent", "--timeout", "120", "presto_x728_sysmon:app"]
