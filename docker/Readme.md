@@ -336,7 +336,7 @@ sudo raspi-config nonint do_i2c 0
 # Verify I2C modules loaded
 lsmod | grep i2c_dev
 
-# Scan for devices
+# Scan for devices(sudo apt install i2c-tools)
 sudo i2cdetect -y 1
 ```
 
