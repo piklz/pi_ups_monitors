@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.0.9
+Version: 3.0.10
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,6 +37,7 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.0.10: tweaked load ma to reflect reallworld timings 
 - v3.0.9: internet status mroe robust to handle container and host tests
 - v3.0.8: added wifi/ethernet status to system info
 - v3.0.7: Tweaked colours and buttons in html/css config section
@@ -86,7 +87,7 @@ import psutil
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
 
-VERSION_STRING = "X728 UPS Monitor v3.0.9"
+VERSION_STRING = "X728 UPS Monitor v3.0.10"
 VERSION_BUILD = "Professional Docker Edition"
 
 app = Flask(__name__)
@@ -123,7 +124,7 @@ DEFAULT_CONFIG = {
     "monitor_interval": 10,
     "enable_auto_shutdown": 1,
     "shutdown_delay": 60,
-    "idle_load_ma": 750  # Idle current draw in mA for time estimation 500-800mA typical
+    "idle_load_ma": 800  # Idle current draw in mA for time estimation 500-800mA typical
 }
 
 # Global state
@@ -671,7 +672,7 @@ def estimate_time_remaining(battery_level, voltage, power_state="On Battery"):
         return "∞ (On AC/Charging)"
     
     capacity_mah = 7000 
-    load_ma = 800
+    load_ma = 1300  # Use configured load current
     if load_ma < 200:
         return "N/A (Low Load)"
     
