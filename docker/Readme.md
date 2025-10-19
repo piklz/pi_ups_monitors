@@ -23,16 +23,18 @@
 <br>
 
 💡TIP: Recommended use + whats needed to run this on host pi:
-###  USING WITH PRESTO {PRESTO_TOOLS}
-Run 'presto_launch' pick 'Build Docker Stack' menu option and load/create your compose app  list from there; to run presto_x728 app with your other chosen services ! or if you are only interested in testing it on its own read steps below: [QUICKSTART](#-Quick-Start) 
+###  USING WITH [PRESTO](https://github.com/piklz/presto) {+PRESTO_TOOLS}
+Run 'presto_launch' pick 'Build Docker Stack' menu option and load/create your compose app  list from there; to run presto_x728 app with your other chosen services ! or if you are only interested in testing it on its own via docker or as a python-script service read steps below: [QUICKSTART](#-Quick-Start) 
 
-#### 💡Required Before running/building Container/script:
+#### 💡Required 2/2 Before running/building Container/script:
 
-**i2c enabled** (raspi-config) + gpio overlay in pi ```/boot/firmware/config.txt``` (simple + works on dietpi,ubuntu,retropie etc)
+- **i2c enabled** (raspi-config) + gpio overlay in pi ```/boot/firmware/config.txt``` (simple + works on dietpi,ubuntu,retropie etc)
 
-Enable Shudown overlay/i2c > place in config.txt:
+- Enable Shudown overlay/i2c > place in 🍓pi's config.txt:
 
-```dtoverlay=gpio-poweroff,gpiopin=13,active_low=0,timeout_ms=10000```
+
+  --- ```dtoverlay=gpio-poweroff,gpiopin=13,active_low=0,timeout_ms=10000```
+
 
 **i2c ENABLE:**
 
@@ -51,7 +53,7 @@ run:
 
 ## 📋 Overview
 
-X728 UPS Monitor is a comprehensive monitoring solution for the X728 UPS HAT (v1.2+) designed for Raspberry Pi 3, 4, and 5. It provides real-time battery monitoring, automatic shutdown capabilities, and a beautiful web-based dashboard.
+X728 UPS Monitor is a comprehensive monitoring solution for the (geekworms) X728 UPS HAT (v1.2+) designed for Raspberry Pi 3, 4, and 5. PrestoX728 provides real-time battery monitoring, automatic shutdown capabilities, and a beautiful web-based dashboard with android/ios notifications via ntfy.
 
 ### ✨ Features
 
@@ -64,6 +66,12 @@ X728 UPS Monitor is a comprehensive monitoring solution for the X728 UPS HAT (v1
 - 🌓 **Dark Mode** - Beautiful light and dark themes
 - 📈 **Historical Data** - Battery history with visual charts
 - 🔐 **Safe Shutdown** - Kernel overlay configuration for UPS power-off
+
+future additions currently looking at:
+
+- MQTT ( think homeassistant support )
+- dockerised version (DONE ✔️)
+- api ( partial⚡✔️ on-going )
 
 ---
 
