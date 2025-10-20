@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.0.10
+Version: 3.0.11
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,12 +37,10 @@ FEATURES:
 
 
 CHANGELOG:
-- v3.0.10: tweaked load ma to reflect reallworld timings 
-- v3.0.9: internet status mroe robust to handle container and host tests
+- v3.0.11:  git repoavail updates shown as  ui+ntfy notifications,improved network detection for host/container hybrid setups
+- v3.0.10: tweaked load ma to reflect realworld timings 
+- v3.0.9: internet status more robust to handle container and host tests
 - v3.0.8: added wifi/ethernet status to system info
-- v3.0.7: Tweaked colours and buttons in html/css config section
-- v3.0.6: minor addition of wifi name to system_info
-
 
 
 USAGE TIPS:
@@ -86,9 +84,23 @@ import psutil
 # ============================================================================
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
-
-VERSION_STRING = "X728 UPS Monitor v3.0.10"
+VERSION_NUMBER= "3.0.11"
+VERSION_STRING = "X728 UPS Monitor"
 VERSION_BUILD = "Professional Docker Edition"
+
+
+# --- GLOBAL VERSION CHECK STATE (display on ui top right as emoji)---
+GITHUB_REPO = "piklz/pi_ups_monitors"
+# Use the new VERSION_NUMBER directly
+CURRENT_VERSION = VERSION_NUMBER 
+LATEST_VERSION_INFO = {
+    "latest": CURRENT_VERSION,
+    "last_check": 0,
+    "update_available": False
+}
+# Check every 1 hour (3600 seconds) in the background
+VERSION_CHECK_INTERVAL = 3600 
+# -------------------------------------
 
 app = Flask(__name__)
 app.secret_key = 'x728_ups_secret_2025_v3'
@@ -396,7 +408,83 @@ def send_ntfy(message, priority="default", title="X728 UPS Alert"):
 # UTILITY FUNCTIONS
 # ============================================================================
 
-# ... (existing functions like send_ntfy, load_config, etc.)
+# ... (functions like send_ntfy, load_config, VERSION check etc.)
+
+
+
+def _parse_version(version_tag): #GITHUB REPO UPDATE CHECKING
+    """Parses a version tag (e.g., 'v3.0.10') into a comparable tuple (3, 0, 10)."""
+    # Remove 'v' or 'V' prefix if present
+    version_str = version_tag.lstrip('v').lstrip('V')
+    try:
+        # Split by '.' and convert to integers for robust comparison
+        return tuple(map(int, version_str.split('.')))
+    except ValueError:
+        log_message(f"Could not parse version tag: {version_tag}", "ERROR")
+        return (0, 0, 0) # Fallback
+
+def check_latest_version(manual=False):
+    """
+    Checks the GitHub API for the latest release version.
+    Updates the global LATEST_VERSION_INFO, flashes messages, and sends an ntfy notification.
+    """
+    global LATEST_VERSION_INFO, CURRENT_VERSION, GITHUB_REPO, VERSION_CHECK_INTERVAL
+
+    now = time.time()
+    # ... (rate limiting logic remains the same)
+    
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    log_message(f"Checking latest release from GitHub API: {api_url}", "INFO")
+
+    try:
+        response = requests.get(api_url, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        latest_tag = data.get('tag_name')
+        
+        if latest_tag:
+            current_ver_tuple = _parse_version(CURRENT_VERSION)
+            latest_ver_tuple = _parse_version(latest_tag)
+            
+            # Update info
+            LATEST_VERSION_INFO["latest"] = latest_tag
+            LATEST_VERSION_INFO["last_check"] = now
+            
+            if latest_ver_tuple > current_ver_tuple:
+                # --- NEW: Check if this is the first time detecting the update ---
+                # This prevents spamming notifications on every hourly check
+                if LATEST_VERSION_INFO["update_available"] is False:
+                    ntfy_message = (
+                        f"🚀 Update Available! "
+                        f"{VERSION_STRING} {current_ver_tuple} can be updated to {latest_tag}. "
+                        f"Check GitHub for details."
+                    )
+                    # Assuming your existing send_ntfy function accepts title/priority
+                    send_ntfy(
+                        message=ntfy_message, 
+                        priority="high", 
+                        title="X728 UPS Monitor Update"
+                    )
+                # -----------------------------------------------------------------
+                
+                LATEST_VERSION_INFO["update_available"] = True
+                log_message(f"New version available! Current: {CURRENT_VERSION}, Latest: {latest_tag}", "WARNING")
+            else:
+                LATEST_VERSION_INFO["update_available"] = False
+                if manual:
+                    flash(f"You are running the latest version: {CURRENT_VERSION}", "success")
+        else:
+            raise ValueError("No 'tag_name' found in GitHub response.")
+
+    except requests.exceptions.RequestException as e:
+        log_message(f"GitHub API request failed: {e}", "ERROR")
+        if manual: flash(f"Version check failed: Cannot reach GitHub API ({e}).", "error")
+    except Exception as e:
+        log_message(f"Version check failed: {e}", "ERROR")
+        if manual: flash(f"Version check failed: An unexpected error occurred ({e}).", "error")
+
+
 
 def configure_kernel_overlay():
     """Checks and configures the gpio-poweroff overlay for safe shutdown (V1.3).
@@ -990,6 +1078,10 @@ def monitor_thread_func():
         try:
             check_thresholds()
             
+            # --- 3.0.11 git Version Check ---
+            check_latest_version()
+            
+            
             # Emit status update
             battery_level = get_battery_level()
             voltage = get_voltage()
@@ -1003,7 +1095,8 @@ def monitor_thread_func():
                 "system_info": get_system_info(),
                 "hardware_error": hardware_error,
                 "gpio_status": "OK" if not gpio_error else gpio_error,
-                "i2c_addr": f"0x{current_i2c_addr:02x}" if current_i2c_addr else "N/A"
+                "i2c_addr": f"0x{current_i2c_addr:02x}" if current_i2c_addr else "N/A",
+                "latest_version_info": LATEST_VERSION_INFO 
             }
             
             socketio.emit('status_update', status)
@@ -1050,7 +1143,7 @@ def send_startup_ntfy():
     time_remaining = estimate_time_remaining(battery_level, voltage, power_state) if power_state == "On Battery" else "∞"
     
     message = (
-        f"🚀 Presto x728 UPS Monitor powered up\n"
+        f"🚀 Presto x728 UPS Monitor powered up [v{CURRENT_VERSION}] \n"
         f"Initial Power State: {power_state}\n"
         f"Estimated Time Remaining: {time_remaining}\n"
         f"Battery: {battery_level:.1f}%\n"
@@ -1128,6 +1221,8 @@ def dashboard():
     return render_template_string(DASHBOARD_TEMPLATE,
         VERSION_STRING=VERSION_STRING,
         VERSION_BUILD=VERSION_BUILD,
+        CURRENT_VERSION=CURRENT_VERSION,
+        GITHUB_REPO=GITHUB_REPO,
         battery_level=f"{battery_level:.1f}",
         voltage=f"{voltage:.2f}",
         # Removed: current=f"{current:.3f}",
@@ -1141,6 +1236,7 @@ def dashboard():
         config=config,
         history=json.dumps(history_chart),
         timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
     )
 
 @app.route('/api/status')
@@ -1251,6 +1347,24 @@ def emit_flash(category, message):
     """Emit a flash message to all connected clients via Socket.IO"""
     socketio.emit('flash_message', {'category': category, 'message': message})
 
+
+
+@app.route('/version/check', methods=['POST', 'GET'])
+def check_version_manual():
+    """Trigger a manual version check, flash the result, and return success JSON."""
+    global CURRENT_VERSION, LATEST_VERSION_INFO
+
+    # The check_latest_version function already handles the flash() call
+    # based on the result (success, failure, or update available).
+    check_latest_version(manual=True)
+    
+    # Flash a warning message if an update is available (from the manual check)
+    if LATEST_VERSION_INFO["update_available"]:
+        flash(f"🚀 New version available! Current: {CURRENT_VERSION}, Latest: {LATEST_VERSION_INFO['latest']} - Please update.", "warning")
+    
+    # --- CHANGE: Return a simple JSON response instead of a redirect ---
+    # This keeps the client on the same page but registers the server-side flash message.
+    return jsonify({"status": "success", "message": "Version check complete."})
 
 
 # ============================================================================
@@ -1524,6 +1638,26 @@ DASHBOARD_TEMPLATE = '''
             height: 200px;
             width: 100%;
         }
+        
+        @keyframes flash-bulb {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.1; } /* Slightly less aggressive than 0 to make it pulse */
+        }
+
+        .flashing {
+            animation: flash-bulb 1s infinite;
+            
+        }   
+         /* NEW: Spinning Icon CSS for Manual Check Feedback */
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .spinning {
+            animation: spin 1s linear infinite;
+        }       
+        
     </style>
 </head>
 <body class="text-gray-900">
@@ -1540,9 +1674,13 @@ DASHBOARD_TEMPLATE = '''
                     </div>
                     <div class="flex items-center gap-4">
                         <div class="text-right">
-                            <p class="text-xs text-gray-900 dark:text-gray-400">Version</p>
-                            <p class="text-sm font-semibold text-gray-800 dark:text-gray-300">{{ VERSION_STRING }}</p>
+                            <p class="text-xs text-gray-900 dark:text-gray-400">Version {{ CURRENT_VERSION}}</p>
+                            <p class="text-sm font-semibold text-gray-800 dark:text-gray-300">{{ VERSION_STRING}}  </p>
                             <p class="text-xs text-gray-800 dark:text-gray-400">{{ VERSION_BUILD }}</p>
+                        <div class="info-section">
+                            <p>{{ VERSION_NUMBER }} <span id="version-status" class="status-indicator"></span></p>                    
+                            
+                        </div>                            
                         </div>
                         <button onclick="toggleDarkMode()" class="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
                             <svg id="darkModeIcon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1550,6 +1688,7 @@ DASHBOARD_TEMPLATE = '''
                         </button>
                     </div>
                 </div>
+                                
             </header>
             
             <!-- Main Metrics Grid -->
@@ -1871,10 +2010,28 @@ DASHBOARD_TEMPLATE = '''
                                 Shutdown will occur after a {{ config.shutdown_delay }}-second delay.
                             </p>
                         </div>
+                    <div class="info-section">
+                    
+                        <div class="mt-4 p-4 bg-purple-50 dark:bg-purple-900 border-l-4 border-purple-500 rounded">
+                            <div class="flex items-center justify-between">
+                                <p class="text-sm text-purple-800 dark:text-purple-200">
+                                    <span class="font-semibold">CHECK UPDATES:</span> {{ VERSION_STRING }} {{ CURRENT_VERSION }}
+                                    <span id="version-status" class="status-indicator"></span>
+                                </p>
+                                
+                                <a href="#" id="manual-version-check" title="Manually Check for Update" 
+                                   class="text-purple-700 dark:text-purple-300 hover:text-purple-900 dark:hover:text-white transition-colors duration-200">
+                                    <span style="font-size: 1.2em;">⚙️</span>
+                                </a>
+                            </div>
+                            
+                            <form method="POST" action="{{ url_for('check_version_manual') }}" id="version-check-form" style="display:none;"></form>
+                        </div>
+                    </div>                       
                     </div>
                 </div>
             </div>
-
+            
             <!-- Logs Section (Single-Column Layout) -->
             <div class="glass-card rounded-2xl p-6">
                 <button onclick="toggleSection('logs')" class="w-full flex justify-between items-center">
@@ -2105,8 +2262,80 @@ DASHBOARD_TEMPLATE = '''
         });
         
         socket.on('status_update', (data) => {
+        
             updateUI(data);
+            
+            // --- Version Check Status Update with Flashing Emojis ---
+            var versionStatusElement = document.getElementById('version-status');
+            var versionInfo = data.latest_version_info;
+
+            if (versionInfo && versionStatusElement) {
+                if (versionInfo.update_available) {
+                    // Apply flashing class to the lightbulb emoji
+                    versionStatusElement.innerHTML = `
+                        <span class="flashing">💡</span>
+                        <span style="color: #9ca3af;">New:</span>
+                        <a href="https://github.com/{{ GITHUB_REPO }}/releases/latest" 
+                           target="_blank" 
+                           style="color: yellow; text-decoration: none;">
+                            ${versionInfo.latest}
+                        </a>
+                    `;
+                    versionStatusElement.className = 'status-indicator text-warning';
+                } else {
+                    // Green dot emoji for up-to-date
+                    versionStatusElement.innerHTML = `🟢`;
+                    // Ensure the flashing class is removed
+                    versionStatusElement.className = 'status-indicator text-success';
+                }
+            }            
         });
+        
+        //This is for check-update button
+        document.addEventListener('DOMContentLoaded', function() {
+            const checkButton = document.getElementById('manual-version-check');
+            const checkIcon = checkButton ? checkButton.querySelector('span') : null;
+            const checkForm = document.getElementById('version-check-form');
+            
+            if (checkButton && checkForm && checkIcon) {
+                checkButton.addEventListener('click', function(event) {
+                    event.preventDefault(); 
+
+                    // 1. Client-side message starts immediately (default 5 seconds)
+                    showFlashMessage('info','Checking updates on Git hub now'); 
+                    
+                    // 2. Visual feedback: Spinning gear and disable button
+                    checkIcon.innerHTML = '⚙️'; 
+                    checkIcon.classList.add('spinning');
+                    checkButton.style.pointerEvents = 'none'; 
+                    
+                    // 3. FIX: Use Fetch/AJAX to perform the check without redirecting
+                    fetch('{{ url_for("check_version_manual") }}', {
+                        method: 'POST'
+                    })
+                    .then(response => {
+                        // Check success is handled by the server (Python route returns 200)
+                    })
+                    .catch(error => {
+                        // Handle network errors client-side
+                        showFlashMessage('error','Version check failed due to a network error.');
+                    })
+                    .finally(() => {
+                        // 4. FIX: After the check is complete, reload the page after 5 seconds.
+                        // This ensures the client-side flash message timer runs out (5s), 
+                        // and then the page reloads to show the server-side flash message 
+                        // stored by the Python route.
+                        
+                        setTimeout(() => {
+                            // Remove client-side flash message
+                            closeFlash();
+                            // Load the dashboard to display the server's final flash message
+                            window.location.href = '{{ url_for("dashboard") }}'; 
+                        }, 5000); // Wait for the flash timer (5 seconds)
+                    });
+                });
+            }
+        });      
         
         // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {
@@ -2216,6 +2445,12 @@ DASHBOARD_TEMPLATE = '''
     }
     setInterval(pollPendingAction, 1000);
     document.addEventListener('DOMContentLoaded', pollPendingAction);
+    
+    
+  
+    
+    
+    
 
     document.getElementById('cancel-action-btn').onclick = function() {
         fetch('/system/cancel', {method: 'POST'})
@@ -2290,7 +2525,7 @@ DASHBOARD_TEMPLATE = '''
 '''
 
 if __name__ == '__main__':
-    print(f"Starting {VERSION_STRING} - {VERSION_BUILD}")
+    print(f"Starting {VERSION_STRING} {CURRENT_VERSION} - {VERSION_BUILD}")
    # Start Flask application
     try:
         log_message(f"Starting web server on port 7728...")
