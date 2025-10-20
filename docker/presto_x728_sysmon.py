@@ -37,6 +37,7 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.1.0 :  added mqtt handling via mosquitto (homeassistant!)+ minor ui tweaks
 - v3.0.12:  minor ui tweaks (model name has swipe anim now) for update checking + footer added 
 - v3.0.11:  git repo avail updates shown as  ui+ntfy notifications,improved network detection for host/container hybrid setups
 - v3.0.10: tweaked load ma to reflect realworld timings 
@@ -73,6 +74,7 @@ import struct
 import json
 import threading
 import secrets
+import paho.mqtt.client as mqtt
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, render_template_string, jsonify, request, flash, redirect, url_for
@@ -85,7 +87,7 @@ import psutil
 # ============================================================================
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
-VERSION_NUMBER= "3.0.12"
+VERSION_NUMBER= "3.1.0"
 VERSION_STRING = "X728 UPS Monitor"
 VERSION_BUILD = "Professional Docker Edition"
 
@@ -99,12 +101,22 @@ LATEST_VERSION_INFO = {
     "last_check": 0,
     "update_available": False
 }
+
 # Check every 1 hour (3600 seconds) in the background
 #VERSION_CHECK_INTERVAL = 3600 
 # Check every 12 hours (43200 seconds) to stay well under the 60/hour limit
 # Check every 24 hours (86400 seconds) for maximum safety
 VERSION_CHECK_INTERVAL = 86400
 # -------------------------------------
+
+
+# ---  MQTT Configuration ---
+MQTT_BROKER = os.environ.get('MQTT_BROKER', 'homeassistant.local') # Or the IP address of your HA/Mosquitto
+MQTT_PORT = int(os.environ.get('MQTT_PORT', 1883))
+MQTT_USER = os.environ.get('MQTT_USER', None)
+MQTT_PASSWORD = os.environ.get('MQTT_PASSWORD', None)
+MQTT_BASE_TOPIC = os.environ.get('MQTT_BASE_TOPIC', 'presto_x728_ups')
+# -------------------------------
 
 app = Flask(__name__)
 
@@ -187,7 +199,55 @@ DISK_PATH = '/' if not os.path.exists('/.dockerenv') else '/host'
 # UTILITY FUNCTIONS
 # ============================================================================
 
+# Global MQTT Client instance
+mqtt_client = None
 
+def init_mqtt():
+    """Initializes the MQTT client and attempts to connect to the broker."""
+    global mqtt_client
+    
+    #  If the broker is the default value, skip initialization -saves errors on init script log output
+    if MQTT_BROKER == 'homeassistant.local' and not os.environ.get('MQTT_BROKER'):
+        log_message("MQTT Broker not explicitly set, skipping initialization.", "INFO")
+        return
+    
+    try:
+        log_message(f"Initializing MQTT client for broker: {MQTT_BROKER}:{MQTT_PORT}", "INFO")
+        
+        mqtt_client = mqtt.Client(client_id=f"{MQTT_BASE_TOPIC}_{os.getpid()}")
+        
+        if MQTT_USER and MQTT_PASSWORD:
+            mqtt_client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+            
+        # Define connection handler for logging
+        def on_connect(client, userdata, flags, rc):
+            if rc == 0:
+                log_message("MQTT connection successful.", "INFO")
+                # Optional: Send Home Assistant discovery messages here if needed
+            else:
+                log_message(f"MQTT connection failed with code {rc}.", "ERROR")
+                
+        mqtt_client.on_connect = on_connect
+        
+        # Start a background thread to handle network traffic and auto-reconnect
+        mqtt_client.loop_start() 
+        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
+        
+    except Exception as e:
+        log_message(f"Failed to initialize or connect MQTT: {e}", "ERROR")
+        mqtt_client = None
+
+def publish_mqtt_data(topic_suffix, payload, retain=False):
+    """Publishes a payload to the full topic."""
+    global mqtt_client
+    if mqtt_client:
+        full_topic = f"{MQTT_BASE_TOPIC}/{topic_suffix}"
+        try:
+            mqtt_client.publish(full_topic, payload, qos=1, retain=retain)
+            # log_message(f"Published to {full_topic}: {payload}", "DEBUG")
+        except Exception as e:
+            log_message(f"Error publishing MQTT data: {e}", "WARNING")
+            
 
 def get_network_info():
     """
@@ -1103,7 +1163,7 @@ def monitor_thread_func():
             battery_level = get_battery_level()
             voltage = get_voltage()
             power_state = get_power_state()
-            
+                        
             status = {
                 "battery_level": f"{battery_level:.1f}",
                 "voltage": f"{voltage:.2f}",
@@ -1117,6 +1177,17 @@ def monitor_thread_func():
             }
             
             socketio.emit('status_update', status)
+            
+            # ---  MQTT Data Publishing ---
+            # Publish each key piece of data to a specific topic
+            publish_mqtt_data("battery_level", f"{battery_level:.1f}")
+            publish_mqtt_data("voltage", f"{voltage:.2f}")
+            publish_mqtt_data("power_state", power_state)
+            
+            # Optional: Publish all status data as one JSON blob for Home Assistant's MQTT Sensor
+            full_payload = json.dumps(status)
+            publish_mqtt_data("state", full_payload)
+            # -----------------------------------
             
             # Dynamic interval: faster polling when on battery for critical checks
             if power_state == "On Battery":
@@ -2626,7 +2697,12 @@ DASHBOARD_TEMPLATE = '''
 
 if __name__ == '__main__':
     print(f"Starting {VERSION_STRING} {CURRENT_VERSION} - {VERSION_BUILD}")
+    
+    # ---  Initialize MQTT ---
+    init_mqtt()
+    # ----------------------------
    # Start Flask application
+   
     try:
         log_message(f"Starting web server on port 7728...")
         
