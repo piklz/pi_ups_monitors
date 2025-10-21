@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.0.12
+Version: 3.1.1
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -83,6 +83,7 @@ import smbus2 as smbus
 import gpiod
 import requests
 import psutil
+import argparse
 
 # ============================================================================
 # CONFIGURATION AND INITIALIZATION
@@ -110,8 +111,27 @@ VERSION_CHECK_INTERVAL = 86400
 # -------------------------------------
 
 
+
+
+# Set to 'INFO' for clean output, 'DEBUG' for full publishing details.
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper() 
+
+# Map levels for comparison
+LOG_LEVEL_MAP = {
+    'DEBUG': 1,
+    'INFO': 2,
+    'WARNING': 3,
+    'ERROR': 4,
+    'CRITICAL': 5
+}
+
+# --- MQTT flask setup --
+SETUP_COMPLETE = False
+MONITOR_INTERVAL_SEC = 1.0  # How often system stats are collected for MQTT PUBLISHING
+MQTT_PUBLISH_INTERVAL_SEC = int(os.environ.get('MQTT_PUBLISH_INTERVAL', 10)) # Default to 10 seconds
+FIRST_CONNECTION_MADE = False
 # ---  MQTT Configuration ---
-MQTT_BROKER = os.environ.get('MQTT_BROKER', 'homeassistant.local') # Or the IP address of your HA/Mosquitto
+MQTT_BROKER = os.environ.get('MQTT_BROKER', '') # Or the IP address of your HA/Mosquitto
 MQTT_PORT = int(os.environ.get('MQTT_PORT', 1883))
 MQTT_USER = os.environ.get('MQTT_USER', None)
 MQTT_PASSWORD = os.environ.get('MQTT_PASSWORD', None)
@@ -203,36 +223,56 @@ DISK_PATH = '/' if not os.path.exists('/.dockerenv') else '/host'
 mqtt_client = None
 
 def init_mqtt():
-    """Initializes the MQTT client and attempts to connect to the broker."""
-    global mqtt_client
+    """Initializes the MQTT client with a unique ID and attempts to connect to the broker."""
+    global mqtt_client, FIRST_CONNECTION_MADE
     
-    #  If the broker is the default value, skip initialization -saves errors on init script log output
-    if MQTT_BROKER == 'homeassistant.local' and not os.environ.get('MQTT_BROKER'):
+    # --- 1. Generate Unique ID ---
+    import random
+    import string
+    
+    random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    
+    # CRITICAL: Use the base topic AND the random suffix for uniqueness
+    unique_client_id = f"{MQTT_BASE_TOPIC}_{random_suffix}"
+    
+    # If the broker is the default value, skip initialization
+    if MQTT_BROKER == '' and not os.environ.get('MQTT_BROKER'):
         log_message("MQTT Broker not explicitly set, skipping initialization.", "INFO")
         return
     
     try:
-        log_message(f"Initializing MQTT client for broker: {MQTT_BROKER}:{MQTT_PORT}", "INFO")
+        log_message(f"Initializing MQTT client ({unique_client_id}) for broker: {MQTT_BROKER}:{MQTT_PORT}", "INFO")
         
-        mqtt_client = mqtt.Client(client_id=f"{MQTT_BASE_TOPIC}_{os.getpid()}")
+        # --- 2. Create the ONE client object using the unique ID ---
+        # The paho.mqtt.client alias is typically just 'mqtt' if imported as 'import paho.mqtt.client as mqtt'
+        # Assume your original definition was correct here (using the paho.mqtt.client directly)
+        mqtt_client = mqtt.Client(
+            client_id=unique_client_id, 
+            protocol=mqtt.MQTTv311, 
+            clean_session=False
+        ) 
         
         if MQTT_USER and MQTT_PASSWORD:
             mqtt_client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
             
         # Define connection handler for logging
         def on_connect(client, userdata, flags, rc):
+            global FIRST_CONNECTION_MADE
             if rc == 0:
-                log_message("MQTT connection successful.", "INFO")
-                # Optional: Send Home Assistant discovery messages here if needed
+                if not FIRST_CONNECTION_MADE:
+                    log_message("MQTT connection successful (First Time).", "INFO")
+                    FIRST_CONNECTION_MADE = True
+                else:
+                    log_message("MQTT connection re-established.", "DEBUG")
             else:
                 log_message(f"MQTT connection failed with code {rc}.", "ERROR")
-                
+
         mqtt_client.on_connect = on_connect
         
-        # Start a background thread to handle network traffic and auto-reconnect
-        mqtt_client.loop_start() 
-        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
-        
+        # Start a background thread and connect
+        mqtt_client.loop_start()  
+        mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 180) # Keepalive 180 seconds
+
     except Exception as e:
         log_message(f"Failed to initialize or connect MQTT: {e}", "ERROR")
         mqtt_client = None
@@ -244,7 +284,7 @@ def publish_mqtt_data(topic_suffix, payload, retain=False):
         full_topic = f"{MQTT_BASE_TOPIC}/{topic_suffix}"
         try:
             mqtt_client.publish(full_topic, payload, qos=1, retain=retain)
-            # log_message(f"Published to {full_topic}: {payload}", "DEBUG")
+            log_message(f"Published to {full_topic}: {payload}", "DEBUG")
         except Exception as e:
             log_message(f"Error publishing MQTT data: {e}", "WARNING")
             
@@ -347,10 +387,13 @@ def initialize_files():
 
 def log_message(message, level="INFO"):
     """Enhanced logging with levels"""
+    if LOG_LEVEL_MAP.get(level.upper(), 0) >= LOG_LEVEL_MAP.get(LOG_LEVEL, 2):
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [{level.upper()}] {message}")
+    
     global config
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     log_entry = f"[{timestamp}] [{level}] {message}"
-    print(log_entry)
+    #print(log_entry) dont need double output!!? remove this
     
     if config.get('debug', 0):
         with lock:
@@ -957,10 +1000,10 @@ def get_pi_model():
     except Exception:
         return "Unknown Pi Model"
         
-        
-# ============================================================================
-# MONITORING AND CONTROL
-# ============================================================================
+ 
+
+
+
 
 def trigger_system_action(action="shutdown", reason="Critical condition"):
     """Initiate safe shutdown or reboot relying on the pre-configured kernel gpio-poweroff overlay."""
@@ -1147,13 +1190,13 @@ def check_thresholds():
 def monitor_thread_func():
     """Background monitoring thread"""
     global monitor_thread_running
-
-    log_message(f"MQTT_BROKER     is set to {os.environ.get('MQTT_BROKER')}", "INFO")      #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    log_message(f"MQTT_BASE_TOPIC is set to {os.environ.get('MQTT_BASE_TOPIC')}", "INFO")  #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
+  
     log_message("Monitor thread started")
     monitor_thread_running = True
     
+    # ADDED: Initialize interval outside try block
+    interval = config.get('monitor_interval', 10) 
+
     while not monitor_thread_stop_event.is_set():
         try:
             check_thresholds()
@@ -1161,12 +1204,10 @@ def monitor_thread_func():
             # --- 3.0.11 git Version Check ---
             check_latest_version()
             
-            
-            # Emit status update
+            # 1. DATA COLLECTION (Runs every loop)
             battery_level = get_battery_level()
             voltage = get_voltage()
             power_state = get_power_state()
-                        
             status = {
                 "battery_level": f"{battery_level:.1f}",
                 "voltage": f"{voltage:.2f}",
@@ -1176,34 +1217,36 @@ def monitor_thread_func():
                 "hardware_error": hardware_error,
                 "gpio_status": "OK" if not gpio_error else gpio_error,
                 "i2c_addr": f"0x{current_i2c_addr:02x}" if current_i2c_addr else "N/A",
-                "latest_version_info": LATEST_VERSION_INFO 
+                "latest_version_info": LATEST_VERSION_INFO
             }
             
+            # 2. UI EMIT (Runs every loop)
             socketio.emit('status_update', status)
             
+            # 3. MQTT PUBLISH (Runs every loop, now matching UI refresh rate)
             # ---  MQTT Data Publishing ---
-            # Publish each key piece of data to a specific topic
             publish_mqtt_data("battery_level", f"{battery_level:.1f}")
             publish_mqtt_data("voltage", f"{voltage:.2f}")
             publish_mqtt_data("power_state", power_state)
             
-            # Optional: Publish all status data as one JSON blob for Home Assistant's MQTT Sensor
             full_payload = json.dumps(status)
             publish_mqtt_data("state", full_payload)
             # -----------------------------------
             
-            # Dynamic interval: faster polling when on battery for critical checks
+            # 4. SET NEXT INTERVAL
             if power_state == "On Battery":
-                interval = 2  # Faster (2s) for real-time critical monitoring
+                interval = 2 # Faster (2s) for real-time critical monitoring
             else:
-                interval = config.get('monitor_interval', 10)  # Normal configurable interval
+                interval = config.get('monitor_interval', 10) # Normal configurable interval
             
         except Exception as e:
             log_message(f"Monitor error: {e}", "ERROR")
-            interval = config.get('monitor_interval', 10)  # Fallback to normal on error
-        
+            interval = config.get('monitor_interval', 10) # Fallback to normal on error
+            
+        # 5. THREAD SLEEP (Waits for the dynamically set 'interval')
         monitor_thread_stop_event.wait(interval)
-    
+        
+        
     monitor_thread_running = False
     log_message("Monitor thread stopped")
 
@@ -1255,6 +1298,37 @@ def send_startup_ntfy():
 # ============================================================================
 # FLASK ROUTES
 # ============================================================================
+
+# (Ensures MQTT runs under Gunicorn)
+
+
+# Define the setup function:
+@app.before_request
+def startup_setup():
+    """Initializes MQTT and the monitoring thread safely under Gunicorn."""
+    global monitor_thread, monitor_thread_running, SETUP_COMPLETE
+    
+    # Check the flag: Run initialization ONLY on the first request for this worker
+    if not SETUP_COMPLETE:
+        log_message("Attempting one-time startup (MQTT/Thread)...", "INFO")
+        
+        # 1. Initialize MQTT
+        init_mqtt() 
+        
+        # 2. Start Monitoring Thread
+        # Check monitor_thread_running flag (which should be set to False initially)
+        if not monitor_thread_running: 
+            monitor_thread = threading.Thread(target=monitor_thread_func, daemon=True)
+            monitor_thread.start()
+            log_message("Monitoring thread started successfully.", "INFO")
+        
+        SETUP_COMPLETE = True
+        log_message("One-time startup complete.", "INFO")
+
+
+
+
+
 pending_action = {
     "type": None,      # "shutdown" or "reboot"
     "thread": None,    # Thread object
@@ -1462,27 +1536,26 @@ def check_version_manual():
 # GUNICORN/MODULE INITIALIZATION (MUST BE IN GLOBAL SCOPE)
 # ============================================================================
 
-# 1. Create config if not already existing ,Load configuration and history (Needs to run before hardware init/monitor thread)
 
-initialize_files()
-load_config()
-load_battery_history()
+# ----------------------------------------------------------------------
+# STAGE 1: SYSTEM FOUNDATION (Files, Config, OS Prep)
+# ----------------------------------------------------------------------
+initialize_files()        # Create necessary file structures.
+load_config()             # Load all application settings and thresholds.
+load_battery_history()    # Load historical battery data for tracking.
+configure_kernel_overlay()# Prepare the OS for hardware access (I2C/GPIO drivers).
 
-# 2. Check and configure kernel overlay on startup
-configure_kernel_overlay() 
+# ----------------------------------------------------------------------
+# STAGE 2: CORE RESOURCE ACQUISITION (Hardware & Network Setup)
+# ----------------------------------------------------------------------
+init_hardware()           # Initialize the physical X728 HAT (I2C bus and GPIO).
+init_mqtt()               # Initialize the unique MQTT client and connect to the broker.(mosquitto container)
 
-# 3. Initialize hardware (I2C/GPIO)
-init_hardware()
-
-# 4. Start monitoring thread (This monitors hardware and emits SocketIO events)
-start_monitor()
-
-# 5. Send startup ntfy
-send_startup_ntfy()
-
-
-
-
+# ----------------------------------------------------------------------
+# STAGE 3: APPLICATION START ( Monitoring & Notifications)
+# ----------------------------------------------------------------------
+start_monitor()           # Start the continuous monitoring thread (relies on hardware and MQTT).
+send_startup_ntfy()       # Send final confirmation notification that the service is running.
 
 
 # ============================================================================
@@ -2697,15 +2770,27 @@ DASHBOARD_TEMPLATE = '''
 </body>
 </html>
 '''
-
+      
+        
+        
 if __name__ == '__main__':
     print(f"Starting {VERSION_STRING} {CURRENT_VERSION} - {VERSION_BUILD}")
+
+    # --- 1. ARGUMENT PARSING & OVERRIDES (MUST BE OUTSIDE GUARD) ---
+    parser = argparse.ArgumentParser(description="X728 UPS Monitor and MQTT Publisher")
+    parser.add_argument('--mqtt-broker', type=str, help='Override MQTT broker hostname/IP.')
+    parser.add_argument('--mqtt-port', type=int, help='Override MQTT broker port.')
+    parser.add_argument('--log-level', type=str, default=LOG_LEVEL, help='Set logging verbosity (DEBUG, INFO, WARNING, ERROR).')
     
-    # ---  Initialize MQTT ---
-    init_mqtt()
-    # ----------------------------
-   # Start Flask application
-   
+    args = parser.parse_args()
+
+    # Apply overrides (Correctly outside the guard)
+    if args.mqtt_broker:
+        MQTT_BROKER = args.mqtt_broker
+    if args.mqtt_port:
+        MQTT_PORT = args.mqtt_port
+
+
     try:
         log_message(f"Starting web server on port 7728...")
         
@@ -2713,10 +2798,9 @@ if __name__ == '__main__':
             app, 
             host='0.0.0.0', 
             port=7728, 
-            debug=False, 
+            debug=False, # Use False to keep the logs clean
             allow_unsafe_werkzeug=True
         )
     except Exception as e:
         log_message(f"CRITICAL: Server failed to start: {e}", "CRITICAL")
-        raise
-
+        raise        
