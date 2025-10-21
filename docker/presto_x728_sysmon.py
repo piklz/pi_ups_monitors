@@ -1147,7 +1147,10 @@ def check_thresholds():
 def monitor_thread_func():
     """Background monitoring thread"""
     global monitor_thread_running
-    
+
+    log_message(f"MQTT_BROKER     is set to {os.environ.get('MQTT_BROKER')}", "INFO")      #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    log_message(f"MQTT_BASE_TOPIC is set to {os.environ.get('MQTT_BASE_TOPIC')}", "INFO")  #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
     log_message("Monitor thread started")
     monitor_thread_running = True
     
