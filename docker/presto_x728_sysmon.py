@@ -37,6 +37,7 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.1.1 :  fixed mqtt publish interval env var parsing issue and docker-vs-script run issues  + less log chatter
 - v3.1.0 :  added mqtt handling via mosquitto (homeassistant!)+ minor ui tweaks
 - v3.0.12:  minor ui tweaks (model name has swipe anim now) for update checking + footer added 
 - v3.0.11:  git repo avail updates shown as  ui+ntfy notifications,improved network detection for host/container hybrid setups
@@ -88,8 +89,8 @@ import argparse
 # ============================================================================
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
-VERSION_NUMBER= "3.1.0"
-VERSION_STRING = "X728 UPS Monitor"
+VERSION_NUMBER= "3.1.1"
+VERSION_STRING = "Prestos X728 UPS Monitor"
 VERSION_BUILD = "Professional Docker Edition"
 
 
@@ -1532,8 +1533,11 @@ def check_version_manual():
     return jsonify({"status": "success", "message": "Version check complete."})
 
 
+
+
+
 # ============================================================================
-# GUNICORN/MODULE INITIALIZATION (MUST BE IN GLOBAL SCOPE)
+# GUNICORN/MODULE INITIALIZATION 
 # ============================================================================
 
 
@@ -1556,6 +1560,9 @@ init_mqtt()               # Initialize the unique MQTT client and connect to the
 # ----------------------------------------------------------------------
 start_monitor()           # Start the continuous monitoring thread (relies on hardware and MQTT).
 send_startup_ntfy()       # Send final confirmation notification that the service is running.
+
+
+
 
 
 # ============================================================================
@@ -2771,8 +2778,9 @@ DASHBOARD_TEMPLATE = '''
 </html>
 '''
       
-        
-        
+
+      
+ # --- RUN SERVER --- 
 if __name__ == '__main__':
     print(f"Starting {VERSION_STRING} {CURRENT_VERSION} - {VERSION_BUILD}")
 
