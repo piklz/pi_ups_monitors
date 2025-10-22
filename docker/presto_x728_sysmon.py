@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.1.3
+Version: 3.1.4
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,14 +37,11 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.1.4 :  new check updates button placement
 - v3.1.3 :  fixed/changed path for local python run vs docker run config dirs and logs
 - v3.1.2 :  removed emoji tag and added darkmode to top right (flex vert stack)
 - v3.1.1 :  fixed mqtt publish interval env var parsing issue and docker-vs-script run issues  + less log chatter
-- v3.1.0 :  added mqtt handling via mosquitto (homeassistant!)+ minor ui tweaks
-- v3.0.12:  minor ui tweaks (model name has swipe anim now) for update checking + footer added 
-- v3.0.11:  git repo avail updates shown as  ui+ntfy notifications,improved network detection for host/container hybrid setups
-- v3.0.10: tweaked load ma to reflect realworld timings 
-- v3.0.9: internet status more robust to handle container and host tests
+
 
 
 
@@ -91,7 +88,7 @@ import argparse
 # ============================================================================
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
-VERSION_NUMBER= "3.1.3"
+VERSION_NUMBER= "3.1.4"
 VERSION_STRING = "Prestos X728 UPS Monitor"
 VERSION_BUILD = "Professional Docker Edition"
 
@@ -2287,26 +2284,32 @@ DASHBOARD_TEMPLATE = '''
                         
                         <div class="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900 border-l-4 border-yellow-500 rounded">
                             <p class="text-sm text-yellow-800 dark:text-yellow-200">
-                                <strong>⚠️ Warning:</strong> System control requires proper Docker privileges (--privileged or sudo access). 
-                                Shutdown will occur after a {{ config.shutdown_delay }}-second delay.
+                                <strong>⚠️ Warning:</strong> Shutdown will occur after a {{ config.shutdown_delay }}-second delay.
                             </p>
                         </div>
                     <div class="info-section">
-                    
                         <div class="mt-4 p-4 bg-purple-50 dark:bg-purple-900 border-l-4 border-purple-500 rounded">
+                            
                             <div class="flex items-center justify-between">
                                 <p class="text-sm text-purple-800 dark:text-purple-200">
-                                    <span class="font-semibold">CHECK UPDATES:</span> {{ VERSION_STRING }} {{ CURRENT_VERSION }}
+                                    <span class="font-semibold">CURRENT VERSION:</span> {{ VERSION_STRING }} {{ CURRENT_VERSION }}
                                     <span id="version-status" class="status-indicator"></span>
                                 </p>
                                 
-                                <a href="#" id="manual-version-check" title="Manually Check for Update" 
-                                   class="text-purple-700 dark:text-purple-300 hover:text-purple-900 dark:hover:text-white transition-colors duration-200">
-                                    <span style="font-size: 1.2em;">⚙️</span>
-                                </a>
+                                <form method="POST" action="{{ url_for('check_version_manual') }}" id="version-check-form">
+                                    
+                                    <button id="manual-version-check" type="submit" title="Manually Check for Update" 
+                                            class="p-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition duration-200 flex items-center justify-center gap-2 text-sm">
+                                        
+                                        <span>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                            </svg>
+                                        </span>
+                                        Check
+                                    </button>
+                                </form>
                             </div>
-                            
-                            <form method="POST" action="{{ url_for('check_version_manual') }}" id="version-check-form" style="display:none;"></form>
                         </div>
                     </div>                       
                     </div>
