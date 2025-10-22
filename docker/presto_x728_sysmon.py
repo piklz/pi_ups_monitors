@@ -2875,8 +2875,6 @@ if __name__ == '__main__':
     if args.log_level:
         LOG_LEVEL = args.log_level.upper()
     
-    # Apply command-line overrides for MQTT/logging
-    # ... (Apply args overrides, like MQTT_BROKER, LOG_LEVEL) ...
     
     # ----------------------------------------------------------------------
     # II. CORE SERVICES INITIALIZATION (RUNS ONLY ONCE IN THE MAIN PROCESS)
