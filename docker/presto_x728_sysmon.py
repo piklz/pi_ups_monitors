@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.1.4
+Version: 3.1.5
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,6 +37,7 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.1.5 :  redo file init to ensure correct permissions/ownership on docker vs local runs
 - v3.1.4 :  new check updates button placement
 - v3.1.3 :  fixed/changed path for local python run vs docker run config dirs and logs
 - v3.1.2 :  removed emoji tag and added darkmode to top right (flex vert stack)
@@ -88,7 +89,7 @@ import argparse
 # ============================================================================
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
-VERSION_NUMBER= "3.1.4"
+VERSION_NUMBER= "3.1.5"
 VERSION_STRING = "Prestos X728 UPS Monitor"
 VERSION_BUILD = "Professional Docker Edition"
 
@@ -370,55 +371,78 @@ def get_network_info():
 
     return display_text, status
         
-        
+
+
+
+# Define the constants for the user/group defined in the Dockerfile       
+
+APPUSER_UID = 1000  # appuser UID
+GPIO_GID = 993      # gpio GID
+FILE_MODE = 0o664   # rw-rw-r-- (Read/Write for owner/group, Read-only for others)
+
+def _init_file(path, default_content, mode, uid, gid, log_message, is_log_file=False):
+    """Helper function to initialize a single file, set its permissions, and ownership."""
+    
+    # 1. Create file with default content if it doesn't exist
+    if not os.path.exists(path):
+        with open(path, 'w') as f:
+            if is_log_file:
+                # Log files get a simple initial message
+                f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] Log file created.\n")
+            else:
+                # Config/History files get JSON content
+                json.dump(default_content, f, indent=4)
+        print(f"[INFO] Initialized default {log_message} file.")
+
+    # 2. Set permissions (mode) and ownership (chown)
+    # The file is always chown'd and chmod'd to ensure correct permissions 
+    # and owner mapping (especially when run as root/UID 0 in Docker)
+    try:
+        os.chown(path, uid, gid)
+        os.chmod(path, mode)
+        # Optional: Print final ownership/permissions for debugging
+        # stat = os.stat(path)
+        # print(f"[DEBUG] {log_message} owner: {stat.st_uid}:{stat.st_gid}, mode: {oct(stat.st_mode)[-4:]}")
+    except Exception as e:
+        # NOTE: This can fail if running as an unprivileged user (not root)
+        print(f"[WARNING] Failed to set owner/permissions for {path}: {e}")
+
 def initialize_files():
-    """Create config and history files with defaults if they don't exist."""
+    """Create config, history, and log files with defaults, set correct permissions (0o664), and ownership."""
     
     print("-" * 50)
     print("STAGE 1: FILE AND DIRECTORY INITIALIZATION")
+    
+    # 1. Create necessary directories
     try:
-        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        # Create directory for CONFIG_PATH/HISTORY_PATH
+        config_dir = os.path.dirname(CONFIG_PATH)
+        os.makedirs(config_dir, exist_ok=True)
+        # Create directory for LOG_PATH (if different, otherwise safe)
         os.makedirs(os.path.dirname(LOG_PATH) if os.path.dirname(LOG_PATH) else '.', exist_ok=True)
-        
-        print(f"[INFO] CONFIG_PATH: {CONFIG_PATH}")
-        print(f"[INFO] HISTORY_PATH: {HISTORY_PATH}")
-        print(f"[INFO] LOG_PATH: {LOG_PATH}")
-        
-        # Initialize config if missing
-        if not os.path.exists(CONFIG_PATH):
-            with open(CONFIG_PATH, 'w') as f:
-                json.dump(DEFAULT_CONFIG, f, indent=4)
-            print("[INFO] Initialized default configuration file on first run.")
-        
-        # Initialize battery history if missing (assuming it's a list from the code)
-        if not os.path.exists(HISTORY_PATH):
-            with open(HISTORY_PATH, 'w') as f:
-                json.dump([], f, indent=4)
-            print("[INFO] Initialized empty battery history file on first run.")
-            
-        # ---  Initialize debug log file ---
-        if not os.path.exists(LOG_PATH):
-            with open(LOG_PATH, 'w') as f:
-                f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [INFO] Log file created by initialize_files()\n")
-            print("[INFO] Log file path initialized.")
-        # ----------------------------------------    
-        
-        # Optional: Set permissions (match Dockerfile's chown for appuser:gpio)
-        os.chmod(CONFIG_PATH, 0o775)
-        os.chmod(HISTORY_PATH, 0o775)
-        os.chmod(LOG_PATH, 0o775)
-        # If running as root (per docker-compose user: "0:0"), chown to appuser (UID 1000, GID 993)
-        import pwd, grp
-        uid = 1000  # appuser UID
-        gid = 993   # gpio GID
-        os.chown(CONFIG_PATH, uid, gid)
-        os.chown(HISTORY_PATH, uid, gid)
-        os.chown(LOG_PATH, uid, gid)
+        print(f"[INFO] Data directory created: {config_dir}")
         
     except Exception as e:
-        print(f"[CRITICAL] Failed to initialize data files or set permissions: {e}")
-        print("Please check directory permissions or volume mounts.")
-        print("-" * 50)
+        print(f"[CRITICAL] Failed to create directories: {e}")
+        print("Please check volume mounts.")
+        return # Stop execution if directories fail
+        
+    print(f"[INFO] CONFIG_PATH: {CONFIG_PATH}")
+    print(f"[INFO] HISTORY_PATH: {HISTORY_PATH}")
+    print(f"[INFO] LOG_PATH: {LOG_PATH}")
+
+    # 2. Initialize files using the helper function
+    try:
+        _init_file(CONFIG_PATH, DEFAULT_CONFIG, FILE_MODE, APPUSER_UID, GPIO_GID, "configuration")
+        _init_file(HISTORY_PATH, [], FILE_MODE, APPUSER_UID, GPIO_GID, "history")
+        _init_file(LOG_PATH, None, FILE_MODE, APPUSER_UID, GPIO_GID, "debug log", is_log_file=True)
+        
+    except Exception as e:
+        print(f"[CRITICAL] Failed to initialize data files: {e}")
+        
+    print("-" * 50)
+
+
 
 
 def log_message(message, level="INFO"):
