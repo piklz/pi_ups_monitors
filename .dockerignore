@@ -1,0 +1,44 @@
+# 1. Version Control & Metadata
+# Do not send Git history/files to the Docker daemon.
+# Git and IDE
+.git
+.gitignore
+.github
+.vscode
+.DS_Store
+
+# Dependencies (install inside the Dockerfile instead)
+node_modules/
+
+
+
+# 2. Python Environment Exclusions
+# You should manage/install dependencies (like virtual envs) inside the container.
+venv
+.venv
+__pycache__
+*.pyc
+
+# 3. Development Environment Exclusions
+# These are local to your VS Code/IDE setup and should not be in the final image.
+.vscode/
+.idea/
+
+# 4. Logs and Temporary Files
+# These change frequently and can unnecessarily bust the Docker build cache.
+*.log
+*.tmp
+temp/
+npm-debug.log*
+tmp/
+temp/
+
+# if you use local config files
+.env
+.env.*
+
+# Existing content is perfect...
+
+# Minor Python/OS Additions (Optional)
+*.swp # Swap files created by Vim/Nano/etc.
+.DS_Store # macOS generated files
