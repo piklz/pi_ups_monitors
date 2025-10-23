@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.1.5
+Version: 3.1.7
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,11 +37,13 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.1.7 :  using x728s built-in RTC (Maxim DS323) now if network goes offline logs and dates use RTC as fallback 
+             |_ then back to os clock when back online and sync.Added ntfy message on network drop/recovery  
+
+- v3.1.6 :  prelim adding setting pin for newer model(v2.0+)setting via env (docker or host)+ 
+             |_ added check if config file been updated since running last load to auto reload 
+
 - v3.1.5 :  redo file init to ensure correct permissions/ownership on docker vs local runs
-- v3.1.4 :  new check updates button placement
-- v3.1.3 :  fixed/changed path for local python run vs docker run config dirs and logs
-- v3.1.2 :  removed emoji tag and added darkmode to top right (flex vert stack)
-- v3.1.1 :  fixed mqtt publish interval env var parsing issue and docker-vs-script run issues  + less log chatter
 
 
 
@@ -89,9 +91,11 @@ import argparse
 # ============================================================================
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
-VERSION_NUMBER= "3.1.5"
-VERSION_STRING = "Prestos X728 UPS Monitor"
-VERSION_BUILD = "Professional Docker Edition"
+VERSION_NUMBER= "3.1.7"
+VERSION_STRING = "Presto X728-UPS Monitor"
+VERSION_BUILD = "Docker Edition"
+
+
 
 
 # --- GLOBAL VERSION CHECK STATE (display on ui top right as emoji)---
@@ -104,12 +108,17 @@ LATEST_VERSION_INFO = {
     "update_available": False
 }
 
+
+
+
 # Check every 1 hour (3600 seconds) in the background
+
 #VERSION_CHECK_INTERVAL = 3600 
 # Check every 12 hours (43200 seconds) to stay well under the 60/hour limit
 # Check every 24 hours (86400 seconds) for maximum safety
 VERSION_CHECK_INTERVAL = 86400
 # -------------------------------------
+
 
 
 
@@ -126,6 +135,8 @@ LOG_LEVEL_MAP = {
     'CRITICAL': 5
 }
 
+
+
 # --- MQTT flask setup --
 SETUP_COMPLETE = False
 MONITOR_INTERVAL_SEC = 1.0  # How often system stats are collected for MQTT PUBLISHING
@@ -138,6 +149,10 @@ MQTT_USER = os.environ.get('MQTT_USER', None)
 MQTT_PASSWORD = os.environ.get('MQTT_PASSWORD', None)
 MQTT_BASE_TOPIC = os.environ.get('MQTT_BASE_TOPIC', 'presto_x728_ups')
 # -------------------------------
+
+
+
+
 
 app = Flask(__name__)
 
@@ -156,15 +171,32 @@ socketio = SocketIO(
     async_mode='threading'
 )
 
-# Constants
-I2C_ADDRS = [0x16, 0x36, 0x3b, 0x4b]
-CONFIG_PATH = "/config/x728_config.json"
-LOG_PATH = "/config/x728_debug.log"
-HISTORY_PATH = "/config/battery_history.json"
 
-# X728 GPIO Pins (BCM numbering)
-GPIO_PLD_PIN = 6   # Power Loss Detection
-GPIO_SHUTDOWN_PIN = 13 # Shutdown signal to UPS pi only
+
+
+
+# ============================================================================
+# HARDWARE GPIO PINS BCM GLOBALS
+# ============================================================================
+
+
+# Time Synchronization Controls SYSTEM/RTC GLOBALS
+I2C_ADDRS = [0x16, 0x36, 0x3b, 0x4b]
+I2C_BUS = 1
+RTC_I2C_ADDR = 0x68            # Standard address for DS3231 (often used in X728)
+RTC_SYNC_INTERVAL_HRS = 24     # Check network time every 24 hour
+LAST_NETWORK_SYNC_TIME = 0     # Timestamp of the last successful network time check
+LAST_TIME_SOURCE = "UNKNOWN"   # Tracks the source used in the previous check
+LAST_NETWORK_DROP_TIME = None  # Stores the time.time() timestamp of the last confirmed network drop
+#for config changes live updates rechecks load_config()
+LAST_CONFIG_MTIME = 0
+
+# X728 GPIO Pins (BCM numbering) - Initial Definition
+GPIO_PLD_PIN = 6          # Power Loss Detection - Constant
+GPIO_SHUTDOWN_PIN = 13    # Shutdown signal to UPS (Default V1.x)
+X728_HW_VERSION = 1       # Default 1  (for Models V1.x/GPIO 13, 2 for Models V2.x+/GPIO 26) 
+
+
 DEFAULT_CONFIG = {
     "low_battery_threshold": 10.0,
     "critical_low_threshold": 2.0,
@@ -213,6 +245,14 @@ ALERT_COOLDOWN = 300  # 5 minutes
 
 # --- Dynamic Path Definition for Docker and Local Execution ---
 
+
+#GLOBAL PATHS 
+# paths for configs
+CONFIG_PATH = "/config/x728_config.json"
+LOG_PATH = "/config/x728_debug.log"
+HISTORY_PATH = "/config/battery_history.json"
+
+
 IS_DOCKER = os.path.exists('/.dockerenv')
 
 #  Set the Base Configuration Directory:
@@ -235,6 +275,196 @@ DISK_PATH = '/' if not os.path.exists('/.dockerenv') else '/host'
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
+
+
+
+
+def bcd_to_dec(bcd):
+    """Convert BCD to Decimal"""
+    return (bcd // 16) * 10 + (bcd % 16)
+
+def dec_to_bcd(dec):
+    """Convert Decimal to BCD"""
+    return (dec // 10) * 16 + (dec % 10)
+
+
+def read_rtc_time():
+    """Reads time from the RTC chip via I2C."""
+    try:
+        # Initialize bus access (assuming it's not initialized globally elsewhere)
+        bus = smbus.SMBus(I2C_BUS)
+        
+        # Read 7 bytes starting from register 0x00 (Seconds)
+        data = bus.read_i2c_block_data(RTC_I2C_ADDR, 0x00, 7)
+        
+        # Convert BCD to standard time components
+        second = bcd_to_dec(data[0] & 0x7F)
+        minute = bcd_to_dec(data[1])
+        hour = bcd_to_dec(data[2] & 0x3F) # Mask to handle 12/24 hour format if necessary
+        day = bcd_to_dec(data[3])
+        date = bcd_to_dec(data[4])
+        month = bcd_to_dec(data[5] & 0x7F)
+        year = bcd_to_dec(data[6]) + 2000
+        
+        # Create a datetime object
+        rtc_dt = datetime(year, month, date, hour, minute, second)
+        return rtc_dt, "RTC"
+        
+    except Exception as e:
+        log_message(f"RTC Read Error: {e}", "ERROR", bypass_rtc_check=True)
+        return None, "SYSTEM_FALLBACK"
+
+def sync_system_time_to_rtc():
+    """Writes the current system time to the RTC chip."""
+    global LAST_NETWORK_SYNC_TIME
+    log_message("Attempting to write current system time to RTC...", "INFO", bypass_rtc_check=True)
+    try:
+        now = datetime.now()
+        
+        # Convert system time components to BCD format
+        data = [
+            dec_to_bcd(now.second),
+            dec_to_bcd(now.minute),
+            dec_to_bcd(now.hour),
+            dec_to_bcd(now.isoweekday()), # Day of week (1=Monday)
+            dec_to_bcd(now.day),
+            dec_to_bcd(now.month),
+            dec_to_bcd(now.year - 2000)
+        ]
+        
+        bus = smbus.SMBus(I2C_BUS)
+        bus.write_i2c_block_data(RTC_I2C_ADDR, 0x00, data)
+        
+        # Update the global sync time marker
+        LAST_NETWORK_SYNC_TIME = time.time()
+        # PASS bypass_rtc_check=True HERE
+        log_message(f"RTC synchronized to system time: {now.strftime('%Y-%m-%d %H:%M:%S')}", "INFO", bypass_rtc_check=True) 
+        return True
+        
+    except Exception as e:
+        # PASS bypass_rtc_check=True HERE
+        log_message(f"RTC Write Error: Failed to synchronize RTC: {e}", "ERROR", bypass_rtc_check=True)
+        return False
+
+
+def check_network_connection():
+    """Simple check for network connectivity (e.g., DNS resolution)."""
+    try:
+        # Pings a known reliable public DNS server
+        import socket
+        socket.setdefaulttimeout(3) 
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect(("1.1.1.1", 53))
+        return True
+    except:
+        return False
+
+def get_current_time_str(include_source=False):
+    """
+    Returns the current time string, dynamically selecting between Network/System
+    and RTC. Logs a WARNING when the source changes due to network failure.
+    """
+    global LAST_NETWORK_SYNC_TIME, LAST_TIME_SOURCE, LAST_NETWORK_DROP_TIME 
+    
+    # We must use datetime.now() inside here to preserve the system time reference
+    system_time = datetime.now() 
+    current_time = system_time 
+    new_source = "SYSTEM/NETWORK" 
+
+    # 1. Check for Network Connection
+    network_available = check_network_connection()
+
+    if network_available:
+        # Network UP: Use System Time & Sync RTC
+        if time.time() - LAST_NETWORK_SYNC_TIME > (RTC_SYNC_INTERVAL_HRS * 3600):
+            sync_system_time_to_rtc() 
+        
+    else:
+        # Network DOWN: Fallback to RTC
+        rtc_dt, rtc_source = read_rtc_time()
+        if rtc_dt:
+            current_time = rtc_dt
+            new_source = rtc_source # "RTC"
+        else:
+            # Fallback to unreliable system time if RTC fails
+            new_source = "SYSTEM_FALLBACK"
+
+    # --- NEW: STATE CHANGE DETECTION AND WARNING ---
+    if new_source != LAST_TIME_SOURCE:
+        
+        # --- SCENARIO A: NETWORK JUST DROPPED (Switching to RTC) ---
+        if new_source == "RTC":
+            # 1. Log warning and save drop time
+            
+            # Use basic log to prevent recursion
+            log_message("NETWORK OFFLINE. Saving drop time and switching to RTC.", "WARNING", bypass_rtc_check=True)
+            
+            # Store the system time when the network was lost
+            LAST_NETWORK_DROP_TIME = time.time() 
+            
+            # Log time discrepancy (already implemented in previous step)
+            rtc_time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+            sys_time_str = system_time.strftime("%Y-%m-%d %H:%M:%S")
+            
+            warning_msg = (
+                f"NETWORK OFFLINE! Switching to {new_source}. "
+                f"System time ({sys_time_str}) vs RTC time ({rtc_time_str}). "
+                f"Time difference: {abs((system_time - current_time).total_seconds()):.1f}s."
+            )
+            log_message(warning_msg, "WARNING", bypass_rtc_check=True)
+            
+        # --- SCENARIO B: NETWORK JUST RECOVERED (Switching from RTC/Fallback) ---
+        elif LAST_TIME_SOURCE != "UNKNOWN" and new_source == "SYSTEM/NETWORK":
+            # 1. Log the immediate recovery
+            log_message(f"NETWORK RESTORED. Switching time source back to {new_source}.", "INFO", bypass_rtc_check=True)
+            
+            # --- CRITICAL FIX: PROCESS AND CLEAR STATE IMMEDIATELY ---
+            drop_time_to_process = LAST_NETWORK_DROP_TIME
+            
+            # 2. LOCK IN THE NEW SOURCE STATE TO PREVENT REPETITION
+            LAST_TIME_SOURCE = new_source
+            LAST_NETWORK_DROP_TIME = None # Clear this flag to prevent re-triggering
+            #time.sleep(1) # Wait 1 second for network stability
+            
+            # 3. NTFY Logic runs only if we had a prior drop time
+            if drop_time_to_process:
+                
+                outage_duration = time.time() - drop_time_to_process
+                outage_hours = outage_duration / 3600
+                
+                # Check current system time against the time the RTC was providing
+                # We need the last known RTC time to calculate drift, 
+                # but we'll use the system time for simplicity since the RTC was providing it moments ago.
+                time_drift_s = abs((system_time - current_time).total_seconds())
+
+                ntfy_title = "X728 UPS: Network Restored: Outage Summary"
+                ntfy_priority = "default" # Use default priority
+                ntfy_message = (
+                    f"✅ Network connection re-established after being down for {outage_hours:.2f} hours.\n"
+                    f"⏰ Log time source switched back to SYSTEM/NETWORK.\n"
+                    f"⏱️ Observed time drift (RTC vs System): **{time_drift_s:.1f} seconds**\n"
+                    f"Action: Time synchronized and monitoring resumed."
+                )
+                
+                # Assume a send_ntfy function exists (using the check_network_connection logic implicitly)
+                # Ensure your script uses 'send_ntfy()' instead of 'send_startup_ntfy()' for general messages
+                send_ntfy(ntfy_message, ntfy_priority, ntfy_title)
+                
+                # Reset the drop time tracker
+                LAST_NETWORK_DROP_TIME = None
+
+    # Update the state for the next check
+    LAST_TIME_SOURCE = new_source
+
+    # Final Return (clean string for log_message to put brackets around)
+    time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+    if include_source:
+        return f"{time_str} ({new_source})"
+    else:
+        return time_str
+        
+        
+        
+        
 
 # Global MQTT Client instance
 mqtt_client = None
@@ -445,9 +675,17 @@ def initialize_files():
 
 
 
-def log_message(message, level="INFO"):
+def log_message(message, level="INFO", bypass_rtc_check=False, show_time_source=False):
     """Enhanced logging with levels, respecting LOG_LEVEL for file writing."""
     global config, LOG_LEVEL
+    
+    if bypass_rtc_check:
+        # If true, use simple, non-recursive system time
+        timestamp_content = datetime.now().strftime("%Y-%m-%d %H:%M:%S (SYSTEM_BASIC)")
+    else:
+        # Otherwise, use the full dynamic time function
+        timestamp_content = get_current_time_str(include_source=show_time_source)
+    
     
     level_upper = level.upper()
     message_level_value = LOG_LEVEL_MAP.get(level_upper, 0)
@@ -460,14 +698,14 @@ def log_message(message, level="INFO"):
     
     # 1. Console / Docker Output Check
     if should_print:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [{level_upper}] {message}")
+        print(f"[{timestamp_content}] [{level.upper():<5}] {message}")
 
        
     # FIX: ONLY write to file if the message was verbose enough to print 
     # AND the debug file-write flag (config['debug']) is enabled
     if should_print and config.get('debug', 0) == 1:
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        log_entry = f"[{timestamp}] [{level_upper}] {message}"
+        
+        log_entry = f"[{timestamp_content}] [{level_upper}] {message}"
         
         with lock:
             try:
@@ -479,7 +717,7 @@ def log_message(message, level="INFO"):
 
 def load_config():
     """Load configuration from JSON file"""
-    global config, LOG_LEVEL
+    global config, LOG_LEVEL, LAST_CONFIG_MTIME
 
     # print script name build verion 
     log_message(f"Starting {VERSION_STRING} - {VERSION_BUILD}")
@@ -513,6 +751,10 @@ def load_config():
                  LOG_LEVEL = 'INFO'
             else:
                  LOG_LEVEL = env_log_level
+                 
+        # Only update the timestamp if the file was successfully read
+        if os.path.exists(CONFIG_PATH):
+            LAST_CONFIG_MTIME = os.path.getmtime(CONFIG_PATH)         
         
         log_message(f"Configuration loaded. Console LOG_LEVEL set to: {LOG_LEVEL}", "INFO")
     except Exception as e:
@@ -1286,6 +1528,19 @@ def monitor_thread_func():
 
     while not monitor_thread_stop_event.is_set():
         try:
+        
+            # --- DYNAMIC CONFIG RELOAD CHECK ---
+            # 1. Check if the config file exists
+            if os.path.exists(CONFIG_PATH):
+                current_mtime = os.path.getmtime(CONFIG_PATH)
+                
+                # 2. Compare it to the last time we loaded it
+                if current_mtime > LAST_CONFIG_MTIME:
+                    log_message("Configuration file modified on disk. Reloading settings dynamically...", "INFO")
+                    # load_config() updates: config, LOG_LEVEL, and LAST_CONFIG_MTIME
+                    load_config()  
+            # ---------------------------------------------
+        
             check_thresholds()
             
             # --- 3.0.11 git Version Check ---
@@ -1325,7 +1580,8 @@ def monitor_thread_func():
                 interval = 2 # Faster (2s) for real-time critical monitoring
             else:
                 interval = config.get('monitor_interval', 10) # Normal configurable interval
-            
+        
+
         except Exception as e:
             log_message(f"Monitor error: {e}", "ERROR")
             interval = config.get('monitor_interval', 10) # Fallback to normal on error
@@ -1340,6 +1596,8 @@ def monitor_thread_func():
 def start_monitor():
     """Start background monitoring"""
     global monitor_thread_running, monitor_thread_stop_event
+    
+
     
     if not monitor_thread_running:
         monitor_thread_stop_event.clear()
@@ -1639,6 +1897,15 @@ configure_kernel_overlay()# Prepare the OS for hardware access (I2C/GPIO drivers
 # STAGE 2: CORE RESOURCE ACQUISITION (Hardware & Network Setup)
 # ----------------------------------------------------------------------
 init_hardware()           # Initialize the physical X728 HAT (I2C bus and GPIO).
+
+# 1. Get the status string with the source tag included
+# This will return "YYYY-MM-DD HH:MM:SS (SYSTEM/NETWORK)"
+time_status = get_current_time_str(include_source=True) 
+
+# 2. Log the status using the standard log_message (which uses the clean timestamp)
+log_message(f"Time source initialized. Current log time is derived from: {time_status}", "INFO")
+# ----------------------------
+
 init_mqtt()               # Initialize the unique MQTT client and connect to the broker.(mosquitto container)
 
 # ----------------------------------------------------------------------
@@ -2856,7 +3123,7 @@ DASHBOARD_TEMPLATE = '''
     </script>
     
     <footer class="mt-12 mb-4">
-        <div align="center" style="padding: 20px; font-size: 1.1em; color: #6b7280;">
+        <div align="center" style="padding: 20px; font-size: 1.1em; color: #222944;">
             <strong>Made with <span class="heartbeat">❤️</span> for the Raspberry Pi Community</strong>
             
             <div style="display: flex; justify-content: center; gap: 10px; margin-top: 10px;">
@@ -2878,8 +3145,8 @@ if __name__ == '__main__':
     print(f"Starting {VERSION_STRING} {CURRENT_VERSION} - {VERSION_BUILD}")
 
     # ----------------------------------------------------------------------
-    # I.  FOUNDATIONAL SETUP (MUST BE OUTSIDE ANY GUARD)
-    # This initializes files/directories and loads config variables (like LOG_LEVEL)
+    # I.  INITAL FUNCTIONS SETUP ()
+    # This initialises files/directories and loads config variables (like LOG_LEVEL)
     # ----------------------------------------------------------------------
     initialize_files()    # Ensures config/log files/directories exist (using print() safely)
     load_config()         # Loads config, setting global LOG_LEVEL
@@ -2887,12 +3154,48 @@ if __name__ == '__main__':
     
     # --- Argument Parsing must run here (outside guard) ---
     parser = argparse.ArgumentParser(description="X728 UPS Monitor and MQTT Publisher")
-    parser.add_argument('--mqtt-broker', type=str, help='Override MQTT broker hostname/IP.')
-    parser.add_argument('--mqtt-port', type=int, help='Override MQTT broker port.')
+    parser.add_argument('--mqtt-broker', type=str, help='Override MQTT broker hostname/IP Use pi ip/hostaname if not run in Docker.')
+    parser.add_argument('--mqtt-port', type=int, help='Override MQTT broker port (Default 1883).')
     parser.add_argument('--log-level', type=str, default=LOG_LEVEL, help='Set logging verbosity (DEBUG, INFO, WARNING, ERROR).')
-    
+    parser.add_argument('--hw-version', 
+                        type=int, 
+                        default=0, # Sentinel: 0 means not set by command line
+                        choices=[1, 2],
+                        help='Specify X728 hardware version (1 for V1.x/GPIO 13, 2 for V2.x+/GPIO 26).')
     args = parser.parse_args()
-
+    
+    # --- DYNAMIC PIN SETTING LOGIC ---
+    #global GPIO_SHUTDOWN_PIN, X728_HW_VERSION
+    
+    version_source = "Default (V1.x)"
+    
+    # 1. Priority: Command-line Argument
+    if args.hw_version in [1, 2]:
+        X728_HW_VERSION = args.hw_version
+        version_source = "Command-Line Argument (--hw-version)"
+    # 2. Secondary: Environment Variable
+    elif os.environ.get('X728_HW_VERSION', '').isdigit():
+        try:
+            env_version = int(os.environ.get('X728_HW_VERSION'))
+            if env_version in [1, 2]:
+                X728_HW_VERSION = env_version
+                version_source = "Environment Variable (X728_HW_VERSION)"
+        except ValueError:
+            # Fallback to default if ENV var is garbage
+            pass 
+    
+    # Set the final shutdown pin based on the determined version
+    if X728_HW_VERSION >= 2:
+        GPIO_SHUTDOWN_PIN = 26 
+    else: 
+        GPIO_SHUTDOWN_PIN = 13 
+        
+    log_message(f"X728 HW Version V{X728_HW_VERSION} detected via {version_source}. Using Shutdown GPIO BCM {GPIO_SHUTDOWN_PIN}", "INFO")
+    # --- DYNAMIC PIN SETTING LOGIC ---
+    
+    
+    
+    
     # Apply overrides (Correctly outside the guard)
     if args.mqtt_broker:
         MQTT_BROKER = args.mqtt_broker
