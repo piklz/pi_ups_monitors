@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.1.7
+Version: 3.1.8
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,6 +37,7 @@ FEATURES:
 
 
 CHANGELOG:
+- v3.1.8 :  fixing race conditions and optimising as testing both docker and python direct modes
 - v3.1.7 :  using x728s built-in RTC (Maxim DS323) now if network goes offline logs and dates use RTC as fallback 
              |_ then back to os clock when back online and sync.Added ntfy message on network drop/recovery  
 
@@ -91,7 +92,7 @@ import argparse
 # ============================================================================
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
-VERSION_NUMBER= "3.1.7"
+VERSION_NUMBER= "3.1.8"
 VERSION_STRING = "Presto X728-UPS Monitor"
 VERSION_BUILD = "Docker Edition"
 
@@ -272,6 +273,10 @@ DISK_PATH = '/' if not os.path.exists('/.dockerenv') else '/host'
 
 
 
+
+
+
+
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
@@ -445,8 +450,8 @@ def get_current_time_str(include_source=False):
                     f"Action: Time synchronized and monitoring resumed."
                 )
                 
-                # Assume a send_ntfy function exists (using the check_network_connection logic implicitly)
-                # Ensure your script uses 'send_ntfy()' instead of 'send_startup_ntfy()' for general messages
+                
+                
                 send_ntfy(ntfy_message, ntfy_priority, ntfy_title)
                 
                 # Reset the drop time tracker
@@ -473,6 +478,11 @@ def init_mqtt():
     """Initializes the MQTT client with a unique ID and attempts to connect to the broker."""
     global mqtt_client, FIRST_CONNECTION_MADE
     
+    # Prevent re-initialization
+    if mqtt_client is not None:
+        log_message("MQTT client already initialized, skipping.", "DEBUG")
+        return
+        
     # --- 1. Generate Unique ID ---
     import random
     import string
@@ -1520,6 +1530,13 @@ def monitor_thread_func():
     """Background monitoring thread"""
     global monitor_thread_running
   
+  
+    # Prevent multiple instances
+    if monitor_thread_running:
+        log_message("Monitor thread already running, exiting duplicate.", "WARNING")
+        return
+        
+        
     log_message("Monitor thread started")
     monitor_thread_running = True
     
@@ -1606,6 +1623,7 @@ def start_monitor():
 
 def send_startup_ntfy():
     """Send startup summary via ntfy"""
+    log_message(f"Sending startup ntfy in PID: {os.getpid()}", "DEBUG")
     if hardware_error:
         send_ntfy(f"⚠️ Startup with hardware error: {hardware_error}", "high", "UPS Startup")
         return
@@ -1643,34 +1661,6 @@ def send_startup_ntfy():
 # ============================================================================
 # FLASK ROUTES
 # ============================================================================
-
-# (Ensures MQTT runs under Gunicorn)
-
-
-# Define the setup function:
-@app.before_request
-def startup_setup():
-    """Initializes MQTT and the monitoring thread safely under Gunicorn."""
-    global monitor_thread, monitor_thread_running, SETUP_COMPLETE
-    
-    # Check the flag: Run initialization ONLY on the first request for this worker
-    if not SETUP_COMPLETE:
-        log_message("Attempting one-time startup (MQTT/Thread)...", "INFO")
-        
-        # 1. Initialize MQTT
-        init_mqtt() 
-        
-        # 2. Start Monitoring Thread
-        # Check monitor_thread_running flag (which should be set to False initially)
-        if not monitor_thread_running: 
-            monitor_thread = threading.Thread(target=monitor_thread_func, daemon=True)
-            monitor_thread.start()
-            log_message("Monitoring thread started successfully.", "INFO")
-        
-        SETUP_COMPLETE = True
-        log_message("One-time startup complete.", "INFO")
-
-
 
 
 
@@ -1879,40 +1869,6 @@ def check_version_manual():
 
 
 
-
-# ============================================================================
-# GUNICORN/MODULE INITIALIZATION 
-# ============================================================================
-
-
-# ----------------------------------------------------------------------
-# STAGE 1: SYSTEM FOUNDATION (Files, Config, OS Prep)
-# ----------------------------------------------------------------------
-initialize_files()        # Create necessary file structures.
-load_config()             # Load all application settings and thresholds.
-load_battery_history()    # Load historical battery data for tracking.
-configure_kernel_overlay()# Prepare the OS for hardware access (I2C/GPIO drivers).
-
-# ----------------------------------------------------------------------
-# STAGE 2: CORE RESOURCE ACQUISITION (Hardware & Network Setup)
-# ----------------------------------------------------------------------
-init_hardware()           # Initialize the physical X728 HAT (I2C bus and GPIO).
-
-# 1. Get the status string with the source tag included
-# This will return "YYYY-MM-DD HH:MM:SS (SYSTEM/NETWORK)"
-time_status = get_current_time_str(include_source=True) 
-
-# 2. Log the status using the standard log_message (which uses the clean timestamp)
-log_message(f"Time source initialized. Current log time is derived from: {time_status}", "INFO")
-# ----------------------------
-
-init_mqtt()               # Initialize the unique MQTT client and connect to the broker.(mosquitto container)
-
-# ----------------------------------------------------------------------
-# STAGE 3: APPLICATION START ( Monitoring & Notifications)
-# ----------------------------------------------------------------------
-start_monitor()           # Start the continuous monitoring thread (relies on hardware and MQTT).
-send_startup_ntfy()       # Send final confirmation notification that the service is running.
 
 
 
@@ -3137,43 +3093,72 @@ DASHBOARD_TEMPLATE = '''
 </body>
 </html>
 '''
-      
 
-      
- # --- RUN SERVER --- 
-if __name__ == '__main__':
-    print(f"Starting {VERSION_STRING} {CURRENT_VERSION} - {VERSION_BUILD}")
 
-    # ----------------------------------------------------------------------
-    # I.  INITAL FUNCTIONS SETUP ()
-    # This initialises files/directories and loads config variables (like LOG_LEVEL)
-    # ----------------------------------------------------------------------
-    initialize_files()    # Ensures config/log files/directories exist (using print() safely)
-    load_config()         # Loads config, setting global LOG_LEVEL
-    load_battery_history()# Load history data (relies on config/file paths)
+# Module-level initialization with lock for Gunicorn multi-worker safety
+import threading
+init_lock = threading.Lock()
+_SERVICES_INITIALIZED = False
+
+def initialize_core_services():
+    """Initialize hardware and monitoring services exactly once."""
+    global _SERVICES_INITIALIZED, SETUP_COMPLETE
+    with init_lock:  # Ensure single execution across Gunicorn workers
+        if _SERVICES_INITIALIZED:
+            log_message("Core services already initialized, skipping.", "DEBUG")
+            return
+        log_message("Initializing core services...", "INFO")
+        try:
+            # STAGE 1: System Foundation
+            initialize_files()
+            load_config()
+            load_battery_history()
+            configure_kernel_overlay()
+            # STAGE 2: Core Resource Acquisition
+            init_hardware()
+            time_status = get_current_time_str(include_source=True)
+            log_message(f"Time source initialized. Current log time is derived from: {time_status}", "INFO")
+            init_mqtt()
+            # STAGE 3: Application Start
+            start_monitor()
+            send_startup_ntfy()
+            _SERVICES_INITIALIZED = True
+            SETUP_COMPLETE = True
+            log_message("All core services initialized successfully.", "INFO")
+        except Exception as e:
+            log_message(f"Failed to initialize core services: {e}", "CRITICAL")
+            raise
+
+
+
+
+# Module-level initialization for Gunicorn/import cases
+if __name__ != '__main__':
+    initialize_core_services()
     
-    # --- Argument Parsing must run here (outside guard) ---
+    
+    
+# Main block for direct execution (args and server only)
+if __name__ == '__main__':
+    import sys
+    # Argument parsing and overrides
     parser = argparse.ArgumentParser(description="X728 UPS Monitor and MQTT Publisher")
-    parser.add_argument('--mqtt-broker', type=str, help='Override MQTT broker hostname/IP Use pi ip/hostaname if not run in Docker.')
-    parser.add_argument('--mqtt-port', type=int, help='Override MQTT broker port (Default 1883).')
-    parser.add_argument('--log-level', type=str, default=LOG_LEVEL, help='Set logging verbosity (DEBUG, INFO, WARNING, ERROR).')
-    parser.add_argument('--hw-version', 
-                        type=int, 
-                        default=0, # Sentinel: 0 means not set by command line
-                        choices=[1, 2],
-                        help='Specify X728 hardware version (1 for V1.x/GPIO 13, 2 for V2.x+/GPIO 26).')
+    parser.add_argument('--mqtt-broker', type=str, help='Override MQTT broker hostname/IP...')
+    parser.add_argument('--mqtt-port', type=int, help='Override MQTT broker port...')
+    parser.add_argument('--log-level', type=str, default=LOG_LEVEL, help='Set logging verbosity...')
+    parser.add_argument('--hw-version', type=int, default=0, choices=[1, 2], help='Specify X728 hardware version...')
+    
+    if '--help' in sys.argv or '-h' in sys.argv:
+        parser.parse_args()  # This will print help and exit
+        sys.exit(0)  # Redundant but explicit
+    
     args = parser.parse_args()
     
-    # --- DYNAMIC PIN SETTING LOGIC ---
-    #global GPIO_SHUTDOWN_PIN, X728_HW_VERSION
-    
+    # Apply overrides
     version_source = "Default (V1.x)"
-    
-    # 1. Priority: Command-line Argument
     if args.hw_version in [1, 2]:
         X728_HW_VERSION = args.hw_version
         version_source = "Command-Line Argument (--hw-version)"
-    # 2. Secondary: Environment Variable
     elif os.environ.get('X728_HW_VERSION', '').isdigit():
         try:
             env_version = int(os.environ.get('X728_HW_VERSION'))
@@ -3181,63 +3166,36 @@ if __name__ == '__main__':
                 X728_HW_VERSION = env_version
                 version_source = "Environment Variable (X728_HW_VERSION)"
         except ValueError:
-            # Fallback to default if ENV var is garbage
-            pass 
-    
-    # Set the final shutdown pin based on the determined version
+            pass
     if X728_HW_VERSION >= 2:
-        GPIO_SHUTDOWN_PIN = 26 
-    else: 
-        GPIO_SHUTDOWN_PIN = 13 
-        
+        GPIO_SHUTDOWN_PIN = 26
+    else:
+        GPIO_SHUTDOWN_PIN = 13
     log_message(f"X728 HW Version V{X728_HW_VERSION} detected via {version_source}. Using Shutdown GPIO BCM {GPIO_SHUTDOWN_PIN}", "INFO")
-    # --- DYNAMIC PIN SETTING LOGIC ---
     
-    
-    
-    
-    # Apply overrides (Correctly outside the guard)
     if args.mqtt_broker:
         MQTT_BROKER = args.mqtt_broker
     if args.mqtt_port:
         MQTT_PORT = args.mqtt_port
-    # You can apply a command-line LOG_LEVEL override here if needed
     if args.log_level:
         LOG_LEVEL = args.log_level.upper()
     
     
-    # ----------------------------------------------------------------------
-    # II. CORE SERVICES INITIALIZATION (RUNS ONLY ONCE IN THE MAIN PROCESS)
-    # ----------------------------------------------------------------------
-    # This check prevents re-running hardware initialization in Flask's reloader or worker processes.
-    if os.environ.get('WERKZEUG_RUN_MAIN') or os.environ.get('GUNICORN_PID'):
-        log_message("Main application process started. Initializing core services...", "INFO")
-        
-        # --- YOUR OPTIMIZED INITIALIZATION SEQUENCE ---
-        configure_kernel_overlay()
-        init_hardware()
-        init_mqtt()
-        start_monitor()
-        send_startup_ntfy()
-        # ---------------------------------------------
-        
-        log_message("All core services initialized successfully.", "INFO")
-    else:
-        # Optional: Print for the reloader process (only if you want to see it running)
-        log_message("Flask reloader process detected. Skipping hardware and monitor thread initialization.", "DEBUG")
-
-
-    # ----------------------------------------------------------------------
-    # III. START SERVER (ALWAYS RUNS)
-    # ----------------------------------------------------------------------
+    
+    # Perform initialization
+    initialize_core_services()
+    
+    
+    
+    # Start server
     try:
         log_message(f"Starting web server on port 7728...", "INFO")
-        
         socketio.run(
-            app, 
-            host='0.0.0.0', 
-            port=7728, 
-            debug=False, # Must be False or the reloader runs even more erratically
+            app,
+            host='0.0.0.0',
+            port=7728,
+            debug=False,
+            use_reloader=False,
             allow_unsafe_werkzeug=True
         )
     except Exception as e:
