@@ -11,7 +11,7 @@ ________________/\\\\\\\\\\\\\\\____/\\\\\\\\\_________/\\\\\\\\\____
         _\///____\///__\///______________\///////////////_____\/////////_____
 
 X728 UPS Monitor - Professional Docker Edition
-Version: 3.1.9
+Version: 3.1.10
 Build: Professional Docker Edition
 Author: Piklz
 GitHub Repository: https://github.com/piklz/pi_ups_monitors
@@ -37,6 +37,8 @@ FEATURES:
 - MQTT PUBLISHING! for Home Automation integration (Home Assistant, Node-RED, etc.) as of v3.1.8
 
 CHANGELOG:
+- v3.1.10 :  log journal support _systemd.journal.JournalHandler_ for docker and host direct/service modes
+             |_  🤞this all works in all 3 modes...tweaks to log ui theme css [robot alien demon]
 - v3.1.9 :  MQTT support added + runs script as a service -install/uninstall script included for host mode (non-docker) 
              |_  1-direct,2-as a service or  3-docker  modes ¬! 
 - v3.1.8 :  fixing race conditions and optimising as testing both docker and python direct modes
@@ -87,12 +89,24 @@ import gpiod
 import requests
 import psutil
 import argparse
+import logging
+import logging.handlers
+
+from collections import deque
+try:
+    from systemd.journal import JournalHandler
+    HAS_JOURNAL = True
+except Exception:
+    HAS_JOURNAL = False
 
 # ============================================================================
 # CONFIGURATION AND INITIALIZATION
 # ============================================================================
 
-VERSION_NUMBER= "3.1.9"
+
+# --- version switch --
+
+VERSION_NUMBER= "3.1.10"
 VERSION_STRING = "Presto X728-UPS Monitor"
 
 def get_execution_mode():
@@ -127,7 +141,16 @@ VERSION_BUILD = get_execution_mode()
 
 
 
+
 # --- GLOBAL VERSION CHECK STATE (display on ui top right as emoji)---
+
+# ----------------------------------------------------------------------
+#  IN-MEMORY LOG BUFFER (UI) – NO FILES NEEDED
+# ----------------------------------------------------------------------
+MAX_LOG_LINES = 200
+_ui_log_buffer = deque(maxlen=MAX_LOG_LINES)
+_log_lock = threading.Lock()
+
 
 GITHUB_REPO = "piklz/pi_ups_monitors"
 
@@ -277,24 +300,23 @@ ALERT_COOLDOWN = 300  # 5 minutes
 # --- Dynamic Path Definition for Docker and Local Execution ---
 
 
-#GLOBAL PATHS 
-# paths for configs
-CONFIG_PATH = "/config/x728_config.json"
-LOG_PATH = "/config/x728_debug.log"
-HISTORY_PATH = "/config/battery_history.json"
-
-
-IS_DOCKER = os.path.exists('/.dockerenv')
+#--- GLOBAL PATHS LOGS
 
 #  Set the Base Configuration Directory:
 # If IS_DOCKER is True, use the absolute path for the volume mount ('/config').
 # If IS_DOCKER is False (host/direct run), use the relative path ('./config').
+IS_DOCKER = os.path.exists('/.dockerenv')
 CONFIG_DIR = '/config' if IS_DOCKER else './config'
+CONFIG_PATH = os.path.join(CONFIG_DIR, 'x728_config.json')
+HISTORY_PATH = os.path.join(CONFIG_DIR, 'x728_history.json')
+
+
+
+
 
 #  Define the final file paths using the determined base directory.
 CONFIG_PATH  = os.path.join(CONFIG_DIR, 'x728_config.json')
 HISTORY_PATH = os.path.join(CONFIG_DIR, 'x728_history.json')
-LOG_PATH     = os.path.join(CONFIG_DIR, 'x728_debug.log')
 
 # Disk path - for direct run, use '/'; for Docker, '/host' if mounted
 DISK_PATH = '/' if not os.path.exists('/.dockerenv') else '/host'
@@ -899,8 +921,6 @@ def initialize_files():
         # Create directory for CONFIG_PATH/HISTORY_PATH
         config_dir = os.path.dirname(CONFIG_PATH)
         os.makedirs(config_dir, exist_ok=True)
-        # Create directory for LOG_PATH (if different, otherwise safe)
-        os.makedirs(os.path.dirname(LOG_PATH) if os.path.dirname(LOG_PATH) else '.', exist_ok=True)
         print(f"[INFO] Data directory created: {config_dir}")
         
     except Exception as e:
@@ -910,14 +930,12 @@ def initialize_files():
         
     print(f"[INFO] CONFIG_PATH: {CONFIG_PATH}")
     print(f"[INFO] HISTORY_PATH: {HISTORY_PATH}")
-    print(f"[INFO] LOG_PATH: {LOG_PATH}")
+    
 
     # 2. Initialize files using the helper function
     try:
         _init_file(CONFIG_PATH, DEFAULT_CONFIG, FILE_MODE, APPUSER_UID, GPIO_GID, "configuration")
-        _init_file(HISTORY_PATH, [], FILE_MODE, APPUSER_UID, GPIO_GID, "history")
-        _init_file(LOG_PATH, None, FILE_MODE, APPUSER_UID, GPIO_GID, "debug log", is_log_file=True)
-        
+        _init_file(HISTORY_PATH, [], FILE_MODE, APPUSER_UID, GPIO_GID, "history")        
     except Exception as e:
         print(f"[CRITICAL] Failed to initialize data files: {e}")
         
@@ -926,45 +944,54 @@ def initialize_files():
 
 
 
+
+# ----------------------------------------------------------------------
+#  LOGGING – journald + console + UI buffer
+# ----------------------------------------------------------------------
+logger = logging.getLogger('presto_x728')
+logger.propagate = False
+logger.setLevel(logging.DEBUG)
+
+# Journal (service / Docker)
+if HAS_JOURNAL:
+    h = JournalHandler()
+    h.setFormatter(logging.Formatter('%(name)s: %(message)s'))
+    logger.addHandler(h)
+
+# Console (direct mode)
+console = logging.StreamHandler()
+console.setFormatter(logging.Formatter('%(message)s'))
+logger.addHandler(console)
+
+# Silence Flask spam
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
+logging.getLogger('werkzeug').propagate = False
+
+
+
+
+
+
+
+
+
 def log_message(message, level="INFO", bypass_rtc_check=False, show_time_source=False):
-    """Enhanced logging with levels, respecting LOG_LEVEL for file writing."""
-    global config, LOG_LEVEL
-    
-    if bypass_rtc_check:
-        # If true, use simple, non-recursive system time
-        timestamp_content = datetime.now().strftime("%Y-%m-%d %H:%M:%S (SYSTEM_BASIC)")
-    else:
-        # Otherwise, use the full dynamic time function
-        timestamp_content = get_current_time_str(include_source=show_time_source)
-    
-    
-    level_upper = level.upper()
-    message_level_value = LOG_LEVEL_MAP.get(level_upper, 0)
-    # NOTE: LOG_LEVEL is now a global controlled by load_config() and the UI toggle
-    configured_level_value = LOG_LEVEL_MAP.get(LOG_LEVEL, 2) 
+    """Log to journald (system) AND in-memory UI buffer."""
+    lvl = level.upper()
+    if LOG_LEVEL_MAP.get(lvl, 5) < LOG_LEVEL_MAP.get(LOG_LEVEL, 2):
+        return
 
-    # Check if the message's level is verbose enough to be printed
-    # (The custom map logic works as intended: DEBUG=1, INFO=2, WARN=3 -> 2 >= 2 prints INFO)
-    should_print = (message_level_value >= configured_level_value)
-    
-    # 1. Console / Docker Output Check
-    if should_print:
-        print(f"[{timestamp_content}] [{level.upper():<5}] {message}")
+    ts = (datetime.now().strftime("%Y-%m-%d %H:%M:%S (SYSTEM_BASIC)")
+          if bypass_rtc_check else get_current_time_str(include_source=show_time_source))
 
-       
-    # FIX: ONLY write to file if the message was verbose enough to print 
-    # AND the debug file-write flag (config['debug']) is enabled
-    if should_print and config.get('debug', 0) == 1:
-        
-        log_entry = f"[{timestamp_content}] [{level_upper}] {message}"
-        
-        with lock:
-            try:
-                # The file is expected to exist from initialize_files()
-                with open(LOG_PATH, 'a') as f:
-                    f.write(log_entry + '\n')
-            except Exception as e:
-                print(f"ERROR: Failed to write to log: {e}")                
+    line = f"[{ts}] [{lvl}] {message}"
+
+    # 1. System journal (service / Docker)
+    getattr(logger, lvl.lower(), logger.info)(line)
+
+    # 2. UI buffer (thread-safe)
+    with _log_lock:
+        _ui_log_buffer.append(line)             
 
 def load_config():
     """Load configuration from JSON file"""
@@ -1022,6 +1049,25 @@ def save_config():
     except Exception as e:
         log_message(f"Failed to save config: {e}", "ERROR")
         raise
+
+
+
+
+
+# --- MODE → EMOJI MAPPING ---👾👺🤖
+MODE_EMOJI = {
+    "Python Direct": "👺",
+    "Python Service": "👾",
+    "Docker Edition": "🤖"
+}
+CURRENT_EMOJI = MODE_EMOJI.get(VERSION_BUILD, "Unknown")
+log_message(f"Mode emoji set to: {CURRENT_EMOJI}", "DEBUG")
+
+
+
+
+
+
 
 def load_battery_history():
     """Load battery history from file"""
@@ -1100,6 +1146,10 @@ def send_ntfy(message, priority="default", title="X728 UPS Alert"):
 # ============================================================================
 
 # ... (functions like send_ntfy, load_config, VERSION check etc.)
+
+
+
+
 
 
 
@@ -1939,7 +1989,6 @@ def dashboard():
     
     battery_level = get_battery_level()
     voltage = get_voltage()
-    # Removed: current = get_current()
     power_state = get_power_state()
     system_info = get_system_info()
     # Explicitly unpack network info to ensure system_info['network'] is a string
@@ -1968,7 +2017,6 @@ def dashboard():
         GITHUB_REPO=GITHUB_REPO,
         battery_level=f"{battery_level:.1f}",
         voltage=f"{voltage:.2f}",
-        # Removed: current=f"{current:.3f}",
         power_state=power_state,
         time_remaining=estimate_time_remaining(battery_level, 0),  # Dummy current=0 since removed
         system_info=system_info,
@@ -1989,14 +2037,19 @@ def api_status():
     voltage = get_voltage()
     
     return jsonify({
+        
         "battery_level": battery_level,
         "voltage": voltage,
         "power_state": get_power_state(),
         "system_info": get_system_info(),
+        "version": VERSION_NUMBER,
+        "build": VERSION_BUILD,
+        "mode_emoji": CURRENT_EMOJI,
         "hardware_status": {
             "i2c": "OK" if not hardware_error else hardware_error,
             "gpio": "OK" if not gpio_error else gpio_error
         }
+        
     })
 
 @app.route('/configure', methods=['POST'])
@@ -2069,21 +2122,13 @@ def system_control():
         log_message(f"System control failed: {e}", "ERROR")
         return {"status": msg}, 500
 
+
+
 @app.route('/logs')
 def get_logs():
-    """Retrieve recent logs"""
-    try:
-        if os.path.exists(LOG_PATH):
-            with open(LOG_PATH, 'r') as f:
-                lines = f.readlines()
-                logs = [line.rstrip() for line in lines[-100:]]
-            return jsonify({"logs": logs})
-            log_message("Logs fetched for web interface", "INFO")    
-        else:
-            return jsonify({"logs": ["Log file not found."]})
-    except Exception as e:
-        log_message(f"Error reading logs: {e}", "ERROR")
-        return jsonify({"logs": [f"Error reading logs: {e}"]})
+    """Return live logs from in-memory buffer."""
+    with _log_lock:
+        return jsonify({'logs': list(_ui_log_buffer)})
 
 
 def emit_flash(category, message):
@@ -2112,7 +2157,14 @@ def check_version_manual():
 
 
 
-
+@app.route('/build')
+def status():
+    return jsonify({
+        'version': VERSION_NUMBER,
+        'build': VERSION_BUILD,
+        'mode_emoji': CURRENT_EMOJI,
+        'services': _SERVICES_INITIALIZED
+    })
 
 
 
@@ -2420,7 +2472,37 @@ DASHBOARD_TEMPLATE = '''
             animation: swipe-glare 12s linear infinite;
         }   
 
-      
+        #log-display {
+            background: #2d3748 !important;
+            color: #e2e8f0 !important;
+            padding: 12px;
+            border-radius: 8px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: "Lucida Console", Monaco, monospace;
+            font-size: 12px;
+            line-height: 1.3;
+            white-space: pre;
+            border: 1px solid #4a5568;
+        }
+
+        .log-line { margin: 0; padding: 2px 0; white-space: pre; display: block; }
+
+        .log-line[data-level="INFO"] [data-level-tag] { color: #00ff00 !important; }
+        .log-line[data-level="WARNING"] [data-level-tag] { color: #ffcc00 !important; }
+        .log-line[data-level="ERROR"] [data-level-tag] { color: #ff4444 !important; }
+        .log-line[data-level="CRITICAL"] [data-level-tag] { color: #ff0000 !important; }
+        .log-line[data-level="DEBUG"] [data-level-tag] { color: #888888 !important; }
+
+        .log-line {
+            margin: 0;
+            padding: 2px 0;
+            white-space: pre;
+            display: block;
+            position: relative;
+        }
+  
+
         
     </style>
 </head>
@@ -2448,13 +2530,17 @@ DASHBOARD_TEMPLATE = '''
                             <p class="text-xs text-gray-900 dark:text-gray-400">Version {{ CURRENT_VERSION}}</p>
                             <p class="text-sm font-semibold text-gray-800 dark:text-gray-300">{{ VERSION_STRING}}  </p>
                             <p class="text-xs text-gray-800 dark:text-gray-400">{{ VERSION_BUILD }}</p>
-                        <div class="info-section">
-                            <p>{{ VERSION_NUMBER }} <span id="version-status" class="status-indicator"></span></p>                    
                             
+                        <div class="info-section">
+                            <p>                            
+                            <span id="version-status" class="status-indicator">{{ VERSION_NUMBER }}</span>
+                            <span id="mode-emoji" style="font-size:1.2em;"></span> 
+                            </p>
                         </div>                            
                         </div>
                         
                     </div>
+                    
                 </div>
                                               
             </header>
@@ -2998,17 +3084,16 @@ DASHBOARD_TEMPLATE = '''
         
         // Refresh logs
         function refreshLogs() {
-            fetch('/logs')
-                .then(response => response.json())
-                .then(data => {
-                    const logDisplay = document.getElementById('log-display');
-                    logDisplay.innerHTML = data.logs.map(line => line + '<br>').join('');
-                    logDisplay.scrollTop = logDisplay.scrollHeight;
-                })
-                .catch(err => {
-                    console.error('Failed to fetch logs:', err);
-                    document.getElementById('log-display').innerHTML = 'Failed to load logs: ' + err + '<br>';
-                });
+            fetch('/logs').then(r=>r.json()).then(data=>{
+                const el=document.getElementById('log-display');
+                el.innerHTML=data.logs.map(line=>{
+                    const m=line.match(/\[(INFO|WARNING|ERROR|CRITICAL|DEBUG)\]/);
+                    const lvl=m?m[1]:'INFO';
+                    const colored=line.replace(/\[(INFO|WARNING|ERROR|CRITICAL|DEBUG)\]/,`[<span data-level-tag>$1</span>]`);
+                    return `<div class="log-line" data-level="${lvl}">${colored}</div>`;
+                }).join('');
+                el.scrollTop=el.scrollHeight;
+            }).catch(()=>{});  
         }
 
         // Auto refresh toggle
@@ -3042,7 +3127,7 @@ DASHBOARD_TEMPLATE = '''
             // --- Version Check Status Update with Flashing Emojis ---
             var versionStatusElement = document.getElementById('version-status');
             var versionInfo = data.latest_version_info;
-
+            
             if (versionInfo && versionStatusElement) {
                 if (versionInfo.update_available) {
                     // Apply flashing class to the lightbulb or star emoji
@@ -3058,9 +3143,10 @@ DASHBOARD_TEMPLATE = '''
                     versionStatusElement.className = 'status-indicator text-warning';
                 } else {
                     // Green dot or robot emoji for up-to-date
-                    versionStatusElement.innerHTML = `🤖`;
+                    versionStatusElement.innerHTML = `✔️`;
                     // Ensure the flashing class is removed
                     versionStatusElement.className = 'status-indicator text-success';
+                    
                 }
             }            
         });
@@ -3294,7 +3380,14 @@ DASHBOARD_TEMPLATE = '''
         }
     }
     
-    
+    function updateModeEmoji() {
+        fetch('/build').then(r=>r.json()).then(d=>{
+            const el = document.getElementById('mode-emoji');
+            if (el) el.textContent = d.mode_emoji;
+        });
+    }
+    updateModeEmoji();
+     
     
     document.addEventListener('DOMContentLoaded', function() {
         const container = document.getElementById('mouse-glare-test'); 
@@ -3319,6 +3412,11 @@ DASHBOARD_TEMPLATE = '''
             // When the mouse leaves the container, the CSS ':hover' transition handles the fade-out.
         }
     });    
+    
+    
+    
+  
+    
     </script>
     
     <footer class="mt-12 mb-4">

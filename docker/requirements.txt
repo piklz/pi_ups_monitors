@@ -29,3 +29,6 @@ psutil>=5.9.8
 
 # Python WSGI HTTP server for running Flask applications in production
 gunicorn==22.0.0
+
+# systemd.journal.JournalHandler
+systemd-python>=234
