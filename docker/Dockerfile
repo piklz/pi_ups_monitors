@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     python3-dev \
     libffi-dev \
     pkg-config \
+    libsystemd-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
@@ -26,6 +27,7 @@ RUN apt-get update && apt-get install -y \
     sudo \
     tzdata \
     util-linux \
+    libsystemd0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Python dependencies from build stage
